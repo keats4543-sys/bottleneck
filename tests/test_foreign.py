@@ -65,11 +65,12 @@ put(THEIRS, COLLIDING, "sid-win", "windows-head", "C:\\Users\\me\\proj")
 
 # The Windows side names its project directories its own way; the point of the
 # fallback walk is that we do not have to guess how.
-transcript(THEIRS, "C--Users-me-proj", "sid-win",
-           [{"type": "user", "message": {"content": "look at the carry spread"}},
-            {"type": "assistant", "timestamp": "2026-07-27T12:00:00Z",
-             "message": {"content": [{"type": "text",
-                                      "text": "Found three of them."}]}}])
+WINTX = transcript(
+    THEIRS, "C--Users-me-proj", "sid-win",
+    [{"type": "user", "message": {"content": "look at the carry spread"}},
+     {"type": "assistant", "timestamp": "2026-07-27T12:00:00Z",
+      "message": {"content": [{"type": "text",
+                               "text": "Found three of them."}]}}])
 
 m.SESSION_DIRS = [os.path.join(MINE, "sessions"), os.path.join(THEIRS, "sessions")]
 m.PROJECT_DIRS = [os.path.join(MINE, "projects"), os.path.join(THEIRS, "projects")]
@@ -111,13 +112,30 @@ check("the local head is untouched by any of this",
       (heads["sid-local"]["foreign"], heads["sid-local"]["pane_id"] is None),
       (False, True))
 
-print("\nliveness comes from its own file, not from /proc")
-check("a file still moving means alive", win["state"] != "DEAD", True)
+print("\nan old stamp is not death")
+# The session file's stamp moves when the status changes and at no other time,
+# so its age is the time since the last transition rather than the time since
+# the head last did anything. Two hours of it is a head parked waiting on you,
+# or one still inside a single long turn - alive, sat in tmux, and burying it
+# takes it out of the queue that exists to hold exactly those.
+check("a fresh record is alive", win["state"] != "DEAD", True)
 put(THEIRS, COLLIDING, "sid-win", "windows-head", "C:\\Users\\me\\proj",
-    ago=m.FOREIGN_GONE + 60)
-gone = {h["session_id"]: h for h in m.collect()}["sid-win"]
-check("a file that stopped moving reads as dead", gone["state"], "DEAD")
-check("even though that pid is very much alive here",
+    status="busy", ago=7200)
+old = {h["session_id"]: h for h in m.collect()}["sid-win"]
+check("and so is one whose status last changed two hours ago",
+      old["state"] != "DEAD", True)
+check("its transcript is still moving, so it is not quiet either",
+      old["state"], "WORKING")
+
+# Quiet is a thing the transcript says, not the stamp - and still never /proc,
+# which would answer about the test runner and call it alive for the wrong
+# reason. Age the transcript and the row says how long it has been silent.
+os.utime(WINTX, (time.time() - 7200, time.time() - 7200))
+quiet = {h["session_id"]: h for h in m.collect()}["sid-win"]
+check("a head nothing has written for two hours reads as stalled",
+      quiet["state"], "STALLED")
+check("and says how long", "quiet for 2h" in quiet["reason"], True)
+check("that pid is very much alive here, and was never asked",
       os.path.isdir(f"/proc/{COLLIDING}"), True)
 
 print("\nand it is never signalled")

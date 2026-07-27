@@ -60,13 +60,22 @@ def claude_procs():
     The safety net for a head that has lost its session file: if it is running,
     it shows up here even when nothing else knows about it.
     """
-    known = set()
+    # Which pid a session file names, and what it says that process's start
+    # time was. The pid alone is not enough to call a process tracked: a file
+    # is named after the pid that wrote it and stays there after that process
+    # goes, so the number gets handed out again and the next claude to wear it
+    # would be read as the head that file describes. procStart is what tells
+    # the two apart - a process that has been running since the file was
+    # written, or a different one wearing the number.
+    known = {}
     try:
         for fname in os.listdir(SESSIONS):
             if fname.endswith(".json"):
                 try:
                     with open(os.path.join(SESSIONS, fname)) as fh:
-                        known.add(json.load(fh).get("pid"))
+                        rec = json.load(fh)
+                    if isinstance(rec, dict) and isinstance(rec.get("pid"), int):
+                        known[rec["pid"]] = rec
                 except (OSError, ValueError):
                     pass
     except OSError:
@@ -89,17 +98,20 @@ def claude_procs():
                         or "/.local/bin/claude" in cmd)
         if not looks_claude:
             continue
+        role = None
         if " bg-pty-host " in cmd or cmd.startswith("claude bg-pty-host"):
             role = "pty-host"
         elif " bg-spare " in cmd:
             role = "spare"
         elif " daemon run" in cmd:
             role = "daemon"
-        elif pid in known:
-            role = "head"
-        else:
-            role = "orphan?"
-        rows.append({"pid": pid, "role": role, "tracked": pid in known,
+        # A file naming this pid is not enough - it has to be naming this
+        # process. Otherwise a stale file dressed a recycled pid up as the head
+        # it used to describe, which is the one row in `ps` you would trust.
+        tracked = pid in known and local_live(known[pid])
+        if role is None:
+            role = "head" if tracked else "orphan?"
+        rows.append({"pid": pid, "role": role, "tracked": tracked,
                      "cmd": cmd[:140]})
     rows.sort(key=lambda r: (r["role"], r["pid"]))
     return rows
@@ -146,16 +158,53 @@ def agents_json():
 FOREIGN = "_foreign"
 
 
+def local_live(rec):
+    """Is this record's pid one of ours, still running, still the same process?
+
+    Only ever asked of a local record. A foreign pid belongs to another
+    machine's numbering, and /proc would answer in good faith about whatever
+    local process happens to be wearing the number.
+    """
+    if rec.get(FOREIGN):
+        return False
+    pid = rec.get("pid")
+    if not isinstance(pid, int):
+        return False
+    started = proc_start(pid)
+    return started is not None and rec.get("procStart") in (None, started)
+
+
+def _rank(rec):
+    """How much a record is worth, when two of them name the same session.
+
+    A live local record is the best thing to have: its pid can be walked to a
+    pane and signalled. A foreign one is next - unknown liveness, but current.
+    A local record whose process is gone is worst, and is the case that
+    actually turns up: a session file is named after the pid that wrote it, so
+    resuming a session gives it a second file, and the first one stays there
+    until someone runs `bottleneck reap`. Newest first within a rank.
+    """
+    return (0 if local_live(rec) else 1 if rec.get(FOREIGN) else 2,
+            -(rec.get("startedAt") or rec.get("updatedAt") or 0))
+
+
 def session_records():
     """Every head Claude Code is running, best source first.
 
     Every home, not just ours: under WSL the claude you launched may be the
-    Windows one, whose files are over on the mounted drive. Ours is read first
-    so a duplicate - the same session id turning up in both, which a symlinked
-    or shared home would do - is kept as the local copy, whose pid we can
-    actually use.
+    Windows one, whose files are over on the mounted drive.
+
+    One session can have more than one file. They are named after the pid that
+    wrote them, and a session id outlives a process - resume one, or resume it
+    on the other side of a WSL mount, and there are two files saying different
+    things about the same head. So a collision is decided by _rank rather than
+    by whichever home or directory entry came first: the file whose pid is a
+    process we can actually use wins, and a leftover from a pid that has since
+    gone loses to a foreign record that is still current. Left to reading
+    order, a stale local file would win on nothing but its position and the
+    head would read as dead - or, worse, hand its pid to a kill.
     """
-    out, seen = [], set()
+    out, at_index = [], {}
     for at, where in enumerate(config.SESSION_DIRS):
         try:
             files = os.listdir(where)
@@ -171,13 +220,16 @@ def session_records():
                 continue
             if not isinstance(got, dict):
                 continue
-            sid = got.get("sessionId") or ""
-            if sid and sid in seen:
-                continue
-            if sid:
-                seen.add(sid)
             if at:
                 got[FOREIGN] = where
+            sid = got.get("sessionId") or ""
+            if sid:
+                seen = at_index.get(sid)
+                if seen is not None:
+                    if _rank(got) < _rank(out[seen]):
+                        out[seen] = got
+                    continue
+                at_index[sid] = len(out)
             out.append(got)
     if out:
         return out

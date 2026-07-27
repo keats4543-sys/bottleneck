@@ -515,6 +515,15 @@ What they can do here depends on how they were started:
   queue under an `elsewhere` heading, keep their state and summary, and are
   skipped by the go-on key.
 
+Neither kind is ever called dead. There is no `/proc` to ask, and the session
+file's stamp only moves when the status changes - so its age is the time since
+the last transition, not since the head last did anything, and reading it as
+liveness buried heads that were parked waiting on you or an hour into one long
+turn. A foreign head stays listed while its record does; how quiet it has been
+comes from its transcript, and a silent one reads `STALLED` with the duration
+rather than vanishing from the queue. One that really has exited leaves its row
+behind until Claude's own file goes, which is the cheap direction to be wrong in.
+
 **Installing Claude Code inside WSL makes all of that go away**, and the two
 installs coexist - separate `~/.claude`, separate history. It is the shorter
 road if you have the choice.
@@ -641,7 +650,6 @@ wins, so a one-off override still works.
 | `BOTTLENECK_HEAD_PCT` | `62` | width of the head pane |
 | `BOTTLENECK_STALL_SECS` | `300` | quiet-but-busy cutoff for `STALLED` |
 | `BOTTLENECK_CLAUDE_HOMES` | `~/.claude`, plus any found under `/mnt/c/Users/*` | colon-separated `.claude` directories to read heads from |
-| `BOTTLENECK_FOREIGN_GONE` | `3600` | seconds before a head on another machine reads as dead |
 | `BOTTLENECK_REFRESH` | `2` | dashboard refresh, seconds |
 | `BOTTLENECK_TASKLINE` | `all` | prompt line per row: `all`, `attention`, `off` |
 | `BOTTLENECK_TASK_BUDGET` | `1048576` | how far back to look for your prompt, bytes |
@@ -703,8 +711,11 @@ temp directory is written.
   session of its own. Backgrounding also drops bypass-permissions back to
   `--permission-mode default` on respawn.
 - **Nothing can hide.** `bottleneck ps` reads `/proc` directly and lists every
-  claude process — heads, daemon, pty-hosts, spares — flagging any that has no
-  session file as `orphan?`. `bottleneck kill <pid> --yes` works on a raw pid
+  claude process — heads, daemon, pty-hosts, spares — flagging any that no
+  session file describes as `orphan?`. Naming the pid is not enough: a session
+  file is named after the pid that wrote it and outlives that process, so the
+  file has to agree about when the process started, or it is describing an
+  earlier one that wore the same number. `bottleneck kill <pid> --yes` works on a raw pid
   even when no head record exists, so a head that loses its session file is
   still reachable.
 - **Heads started outside tmux cannot be moved in.** tmux cannot adopt a foreign

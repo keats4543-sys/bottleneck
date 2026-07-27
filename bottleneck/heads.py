@@ -4,24 +4,13 @@ import time
 
 from . import config
 from .config import NEEDS_ATTENTION, STALL_SECS, STATES
-from .procs import FOREIGN, proc_start, session_records, tty_of
+from .procs import FOREIGN, local_live, session_records, tty_of
 from .store import (ack_ts, assign_slots, binds_apply, bound_pane,
                     claims_apply, group_label, group_rank, group_ids, held_at,
                     hold_stale, queue_load, read_attention, set_hold, unbind)
 from .tmuxio import (dash_pane, locate, pane_window, panes_by_id,
                      panes_by_pid)
 from .transcript import read_step, subagent_seen, transcript_for
-
-
-# How long a foreign head's file may sit unchanged before we call it gone.
-#
-# There is no /proc to ask, so this is the whole of the evidence. Claude touches
-# the file as it works, and a head sat waiting on you is not working - so this
-# has to outlast the longest you might leave one waiting, or the dashboard would
-# quietly bury the heads it exists to show you. An hour is wrong in the cheap
-# direction: a head that really did die lingers until it ages out, which is a
-# stale row rather than a missing one.
-FOREIGN_GONE = float(os.environ.get("BOTTLENECK_FOREIGN_GONE", "3600"))
 
 
 def collect():
@@ -48,18 +37,25 @@ def collect():
 
         # A foreign head's pid belongs to another machine's numbering, so /proc
         # cannot answer for it - and would answer about the wrong process if
-        # some local one happened to be wearing the number. Its own file is the
-        # only witness we have: claude rewrites it as the head works, so a file
-        # that has stopped moving is the nearest thing to a dead process we can
-        # honestly say. Generous on purpose, because being wrong here means
-        # calling a working head dead.
+        # some local one happened to be wearing the number. There is no liveness
+        # question we can ask, and the age of the session file's own stamp used
+        # to stand in for one: an hour without a write and the head was buried.
+        #
+        # That stamp is not a heartbeat. Claude writes it when the status
+        # changes and at no other time - measured on this box, a head in the
+        # middle of a tool call with its file untouched for 230 seconds - so its
+        # age is the time since the last transition, not the time since the head
+        # last did anything. Which buried precisely the wrong heads: one parked
+        # waiting on you for an hour, and one two hours into a single long turn.
+        # Both alive, both sat in tmux where you could still talk to them, both
+        # dropped out of the queue that exists to hold them.
+        #
+        # So the record existing is the whole of the evidence. What the head is
+        # doing is read from its transcript below, and if that has gone quiet
+        # the row says STALLED and for how long - a fact you can act on, rather
+        # than a burial we cannot support.
         foreign = bool(s.get(FOREIGN))
-        if foreign:
-            stamped = (s.get("statusUpdatedAt") or s.get("updatedAt") or 0) / 1000.0
-            live = bool(stamped) and (now - stamped) < FOREIGN_GONE
-        else:
-            started = proc_start(pid)
-            live = started is not None and s.get("procStart") in (None, started)
+        live = True if foreign else local_live(s)
         sid = s.get("sessionId") or ""
         cwd = s.get("cwd") or ""
         raw = (s.get("status") or "").lower()
@@ -68,11 +64,16 @@ def collect():
         tpath = transcript_for(sid, cwd) if sid else None
         if tpath:
             step, last_ts, ask, task, kids = read_step(tpath)
-            if not last_ts:
-                try:
-                    last_ts = os.path.getmtime(tpath)
-                except OSError:
-                    last_ts = 0.0
+            # An entry timestamp is written by whoever wrote the transcript, and
+            # for a head across a WSL mount that is the Windows clock, which can
+            # sit an hour or more from this one - so an idle_for computed
+            # against our `now` from their clock is off by the skew. The mtime
+            # is read here and cannot disagree with us. Newest of the two, which
+            # is also the answer when the entries carry no timestamp at all.
+            try:
+                last_ts = max(last_ts, os.path.getmtime(tpath))
+            except OSError:
+                pass
             # While agents are out, their work is this head's work. Counting it
             # as such is what stops a head that dispatched an hour of research
             # from reading as quiet after five minutes of not typing.
