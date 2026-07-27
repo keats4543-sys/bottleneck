@@ -1,0 +1,30 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The floor the README claims, and something current.
+        python: ["3.8", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: suite
+        run: bash tests/run.sh
+      - name: install and unmount cleanly
+        run: |
+          bash install.sh
+          test -L "$HOME/.local/bin/bottleneck"
+          "$HOME/.local/bin/bottleneck" --version
+          "$HOME/.local/bin/bottleneck" list
+          bash install.sh --unmount
+          test ! -e "$HOME/.local/bin/bottleneck"

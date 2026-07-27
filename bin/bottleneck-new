@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+# bottleneck-new - open a Claude Code head as a window in the `bottleneck` tmux
+# session, so the dashboard can raise it later. Heads on a bare tty can be
+# watched but never raised. Reachable as `bottleneck new` too.
+#
+#   bottleneck new                     new head, named for you
+#   bottleneck new grains              new head named "grains", here
+#   bottleneck new grains ~/proj       new head named "grains", there
+#
+#   bottleneck new -r                  resume: interactive picker
+#   bottleneck new -r <session-id>     resume that session
+#   bottleneck new -r <term>           picker seeded with a search term
+#   bottleneck new -c                  continue the most recent session in a dir
+#
+#   bottleneck new grains . -- --model sonnet   anything after -- goes to claude
+#
+#   bottleneck new grains -g 2         new head, in priority group 2
+#
+# Flags: -d <dir> sets the working directory. -g <n> puts the head in a group
+# the moment it appears (BOTTLENECK_GROUP sets a default for every head you
+# start this way). --fork lets you resume a session that is already running,
+# under a new id (the original is left alone).
+set -euo pipefail
+
+STATE="${BOTTLENECK_STATE:-$HOME/.bottleneck}"
+
+# KEY=VALUE defaults, same file the dashboard reads. A real environment
+# variable wins, so a one-off override still works.
+if [ -r "$STATE/config" ]; then
+    while IFS='=' read -r key val; do
+        case "$key" in
+            BOTTLENECK_*)
+                val="${val%\"}"; val="${val#\"}"
+                [ -z "${!key:-}" ] && export "$key=$val" ;;
+        esac
+    done < "$STATE/config"
+fi
+
+BN_SESSION="${BOTTLENECK_TMUX_SESSION:-bottleneck}"
+
+# tmux runs the head through a shell, so anything we put in that command line
+# has to survive quoting. A name with an apostrophe in it is the ordinary case;
+# treat it as one, not as an error and not as something to run.
+shq() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+
+# Heads launch with permission prompts on, like plain `claude`.
+# BOTTLENECK_DANGEROUS=1 launches them with --dangerously-skip-permissions.
+case "${BOTTLENECK_DANGEROUS:-0}" in
+    1|yes|true|on) DANGEROUS="--dangerously-skip-permissions" ;;
+    *)             DANGEROUS="" ;;
+esac
+
+# How to say "claude" in a tmux window. tmux runs a window's command through a
+# shell that is neither interactive nor a login shell, so an alias, a function
+# and a PATH set in ~/.bashrc all vanish on the way - and the window says
+# "command not found" about a program you had just used. An absolute path needs
+# no shell to agree with it; failing that, ask your own shell the way you use
+# it; failing that, hand it the whole launch and let it expand its own alias.
+claude_launch() {
+    if [ -n "${BOTTLENECK_CLAUDE:-}" ]; then printf '%s' "$BOTTLENECK_CLAUDE"; return; fi
+    here="$(command -v claude 2>/dev/null || true)"
+    case "$here" in /*) printf '%s' "$here"; return ;; esac
+    # Marked, because a .bashrc that greets you would otherwise be the answer,
+    # and `|| true` because a shell that cannot find claude exits nonzero -
+    # which under `set -e` would kill us before the message below gets printed.
+    yours="$("${SHELL:-/bin/bash}" -lic \
+             'printf "__bn__%s\n" "$(command -v claude || type -P claude)"' \
+             2>/dev/null | sed -n 's/^__bn__//p' | tail -1 | tr -d '\r')" || true
+    case "$yours" in
+        /*) printf '%s' "$yours" ;;
+        ?*) printf '%s -lic %s claude' "$(shq "${SHELL:-/bin/bash}")" \
+                   "$(shq 'claude "$@"')" ;;
+        *)  printf '' ;;
+    esac
+}
+CLAUDE="$(claude_launch)"
+if [ -z "$CLAUDE" ]; then
+    echo "bottleneck new: cannot find claude." >&2
+    echo "       Set BOTTLENECK_CLAUDE to its full path in $STATE/config" >&2
+    exit 1
+fi
+
+# Where a head lands when you do not say: here.
+DEFAULT_DIR="${BOTTLENECK_DEFAULT_DIR:-$PWD}"
+[ -d "$DEFAULT_DIR" ] || DEFAULT_DIR="$PWD"
+
+name="" dir="" mode="new" target="" fork="" extra=""
+
+# A default group for every head started this way, so a fleet you want ranked
+# together does not need the flag six times. -g wins, "none" turns it off.
+group="${BOTTLENECK_GROUP:-}"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -r|--resume)
+            mode="resume"
+            if [ $# -gt 1 ] && [ "${2:0:1}" != "-" ]; then target="$2"; shift; fi
+            ;;
+        -c|--continue) mode="continue" ;;
+        --fork|--fork-session) fork="--fork-session" ;;
+        -d|--dir) dir="${2:-}"; shift ;;
+        -g|--group) group="${2:-}"; shift ;;
+        --) shift; extra="$*"; break ;;
+        -*) echo "bottleneck new: unknown flag $1" >&2; exit 2 ;;
+        *)
+            if [ -z "$name" ] && [ "$mode" = "new" ]; then name="$1"
+            elif [ -z "$dir" ]; then dir="$1"
+            else echo "bottleneck new: unexpected argument $1" >&2; exit 2
+            fi
+            ;;
+    esac
+    shift
+done
+
+# A session can only be resumed from the directory it belongs to, so when you
+# name one by id, use its own cwd rather than wherever you happen to be standing.
+if [ "$mode" = "resume" ] && [ -n "$target" ] && [ -z "$dir" ]; then
+    found="$(python3 - "$target" <<'PY'
+import glob, json, os, sys
+want = sys.argv[1]
+for p in glob.glob(os.path.expanduser("~/.claude/projects/*/%s.jsonl" % want)):
+    try:
+        with open(p) as fh:
+            for line in fh:
+                d = json.loads(line)
+                if d.get("cwd"):
+                    print(d["cwd"])
+                    raise SystemExit(0)
+    except (OSError, ValueError):
+        continue
+PY
+)"
+    if [ -n "$found" ] && [ -d "$found" ]; then
+        dir="$found"
+        echo "bottleneck new: resuming in $dir"
+    fi
+fi
+
+dir="$(cd "${dir:-$DEFAULT_DIR}" && pwd)"
+
+# Refuse to point two processes at one session unless asked to fork.
+if [ "$mode" = "resume" ] && [ -n "$target" ] && [ -z "$fork" ]; then
+    live="$(python3 - "$target" <<'PY'
+import glob, json, os, sys
+want = sys.argv[1]
+for p in glob.glob(os.path.expanduser("~/.claude/sessions/*.json")):
+    try:
+        s = json.load(open(p))
+    except Exception:
+        continue
+    if s.get("sessionId") == want and os.path.isdir("/proc/%s" % s.get("pid")):
+        print("%s\t%s" % (s.get("name") or "?", s.get("pid")))
+        break
+PY
+)"
+    if [ -n "$live" ]; then
+        echo "bottleneck new: that session is already running as '${live%%$'\t'*}' (pid ${live##*$'\t'})." >&2
+        echo "       Attach to it instead, or re-run with --fork to branch a copy." >&2
+        exit 1
+    fi
+fi
+
+case "$mode" in
+    new)
+        # Every head gets a name. Naming them all after the directory means a
+        # list of six heads all called "src" later, no better than guids.
+        [ -z "$name" ] && name="$(bottleneck newname 2>/dev/null || basename "$dir")"
+        cmd="$CLAUDE --name $(shq "$name") $DANGEROUS"
+        ;;
+    resume)
+        # A full session id makes a useless window label - keep the first block.
+        if [ -z "$name" ]; then
+            if [ -n "$target" ]; then name="re-${target%%-*}"; else name="resume"; fi
+        fi
+        cmd="$CLAUDE --resume ${target:+$(shq "$target")} $fork $DANGEROUS"
+        ;;
+    continue)
+        name="${name:-$(basename "$dir")}"
+        cmd="$CLAUDE --continue $fork $DANGEROUS"
+        ;;
+esac
+
+# The group cannot be set here: claude picks the session id the group hangs on,
+# seconds from now, in a process we have not started yet. So claim it against
+# the name we are launching under and let the dashboard hand it over the moment
+# the head turns up. A resume by id already knows the id - that goes straight in
+# the book. Claimed before the window opens, so the head cannot beat us to it.
+if [ -n "$group" ] && [ "$group" != "none" ]; then
+    claim_for="$name"
+    [ "$mode" = "resume" ] && [ -n "$target" ] && claim_for="$target"
+    if ! bottleneck claim "$claim_for" "$group" >/dev/null 2>&1; then
+        echo "bottleneck new: could not claim group $group for $claim_for" >&2
+    fi
+fi
+
+# tmux window names cannot contain a dot or a colon
+safe_name="$(printf '%s' "$name" | tr './:' '---' | cut -c1-32)"
+
+if ! tmux has-session -t "$BN_SESSION" 2>/dev/null; then
+    # Here, not $HOME: the dashboard's directory is what a new head defaults to.
+    tmux new-session -d -s "$BN_SESSION" -n dash -c "$PWD" "exec bottleneck watch"
+fi
+
+# Hold the window open if claude bails, so the error is readable instead of the
+# window silently vanishing (tmux closes a window when its command exits).
+tmux new-window -t "$BN_SESSION" -n "$safe_name" -c "$dir" \
+    "$cmd $extra || { printf '\n[bottleneck new] claude exited %s in %s\n' \"\$?\" $(shq "$dir"); read -r _; }"
+
+if [ -n "${BOTTLENECK_NO_ATTACH:-}" ]; then
+    echo "opened '$name' in $BN_SESSION ($mode, $dir)"
+elif [ -n "${TMUX:-}" ]; then
+    tmux switch-client -t "$BN_SESSION"
+else
+    tmux attach-session -t "$BN_SESSION"
+fi

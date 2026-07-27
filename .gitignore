@@ -1,0 +1,18 @@
+# Everything bottleneck writes at runtime lives in ~/.bottleneck, outside this
+# checkout. These entries exist so a stray copy of it can never be committed:
+# the catalogue holds session names, directories and branches.
+catalog.json
+cycle.json
+autoraise
+config
+attention/
+acks/
+
+__pycache__/
+*.pyc
+*.swp
+.DS_Store
+
+# The README picture generators. Useful, but not part of bottleneck - the SVGs
+# they produce are what the README needs, and those are committed.
+tools/
