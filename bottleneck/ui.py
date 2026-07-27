@@ -11,7 +11,8 @@ from .config import (CTL, DANGEROUS, DEFAULT_DIR, NEEDS_ATTENTION, REFRESH,
 from .catalog import catalog_note, random_name, session_list
 from .heads import collect, fmt_age
 from .panes import (auto_raise, claude_cmd, focus, kill_head, next_or_park,
-                    park, reaped, restart_here, send_go, spawn, warm_claude)
+                    park, reaped, restart_here, send_go, spawn, starting,
+                    warm_claude)
 from .store import (auto_enabled, by_slot, claim_group, clear_attention,
                     group_ids, group_label, mark_seen, move_group,
                     name_group, queue_load, queue_save, set_auto, set_group,
@@ -743,6 +744,13 @@ def watch():
             catalog_note(heads)
             publish_bar(heads)
             if auto_enabled():
+                # Say why nothing is moving. The wait is short and it is the
+                # dashboard doing as it was told, which is worth a line - a
+                # queue that has gone quiet on its own is the thing you would
+                # otherwise sit and wonder about.
+                coming = starting(heads)
+                if coming:
+                    note = f"queue held - {coming} is starting"
                 raised, held = auto_raise(heads, held, me)
                 if raised:
                     note = f"raised {raised['name']} - {raised['state'].lower()}"

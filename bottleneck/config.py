@@ -174,6 +174,14 @@ SHELL = os.environ.get("SHELL") or "/bin/bash"
 STALL_SECS = int(os.environ.get("BOTTLENECK_STALL_SECS", "300"))
 
 
+# How long a head we have just opened has to turn up in the list before the
+# queue stops waiting for it. Only ever a backstop - the wait normally ends the
+# moment the head appears, a second or two after launch. It exists for the
+# launch that never becomes a head at all, so a pane printing "command not
+# found" cannot hold the queue for the rest of the day.
+SPINUP_SECS = float(os.environ.get("BOTTLENECK_SPINUP_SECS", "30"))
+
+
 REFRESH = float(os.environ.get("BOTTLENECK_REFRESH", "2"))
 
 

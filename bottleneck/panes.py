@@ -10,7 +10,7 @@ import time
 
 from . import config
 from .config import (DASH_OPT, HEAD_PCT, HOME, NEEDS_ATTENTION, ROLE,
-                     SESSION, STATES)
+                     SESSION, SPINUP_SECS, STATES)
 from .procs import kill_pid
 from .store import (bind_pane, clear_attention, cycle_state, mark_seen,
                     set_cycle_state, unbind)
@@ -246,6 +246,50 @@ def answered(head):
     head["reason"] = ""
 
 
+_starting = None        # (pane_id, label, deadline) for a head we have opened
+
+
+def starting(heads, now=None):
+    """The name of a head we have just opened that has not turned up yet, or "".
+
+    There are seconds between opening the pane and the head existing: claude
+    picks its session id in another process, and until it has written a session
+    file there is nothing on disk for collect() to find. For that window the
+    pane beside the dashboard holds a head that the list cannot see - which
+    reads, to everything that asks, exactly like an empty main pane.
+
+    That is not a cosmetic gap. auto_raise treats an empty main pane as free,
+    so the first waiting head in the queue was being raised into the pane the
+    new one was still coming up in - and focus() breaks the sitting pane out to
+    a window of its own to make room, so the head you had just asked for was
+    torn out mid-launch and left somewhere you were not looking. With the
+    cursor on the dashboard it was worse: an empty main pane is also the one
+    case a raise takes your cursor with it, so the keys you were about to type
+    at the new head went to a different one.
+
+    So a spawn says what it opened, and the queue does not push into the main
+    pane until that head is in the list. Three things end the wait, and the
+    common one is the first: the head turns up, the pane goes away, or
+    SPINUP_SECS passes without either - the backstop for a launch that never
+    becomes a head, which must not hold the queue indefinitely.
+
+    Only automatic movement waits on this. `j`, Alt+j and the go-on key are you
+    asking for a head by name, and a queue that ignored you because something
+    else was starting would be a worse bargain than the one this fixes.
+    """
+    global _starting
+    if _starting is None:
+        return ""
+    pane, label, deadline = _starting
+    now = time.time() if now is None else now
+    if (now >= deadline
+            or any(h.get("pane_id") == pane for h in heads)
+            or pane not in panes_by_id()):
+        _starting = None
+        return ""
+    return label
+
+
 def auto_raise(heads, held, dash_pane_id=""):
     """Bring the top waiting head into the main pane when that pane is free.
 
@@ -267,6 +311,12 @@ def auto_raise(heads, held, dash_pane_id=""):
 
     Returns (head_raised_or_None, new_held).
     """
+    # A head we opened is still coming up in there. The pane reads as empty
+    # because the head is not on disk yet, and raising into it would evict the
+    # one you just asked for.
+    if starting(heads):
+        return None, held
+
     want = [h for h in heads
             if h["attention"] and h["pane_id"] and not h.get("elsewhere")]
     cur = next((h for h in heads if h["in_main"]), None)
@@ -446,6 +496,10 @@ def spawn(cmd, cwd, label, heads):
     # now, in another process; the name is all we have to hang this on until the
     # first refresh that sees the head sees both.
     bind_pane(label, pane)
+    # And the queue stands off this pane until that refresh comes - see
+    # starting(). Set last, so a spawn that failed above never freezes anything.
+    global _starting
+    _starting = (pane, label, time.time() + SPINUP_SECS)
     return True
 
 
