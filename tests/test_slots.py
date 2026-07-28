@@ -43,6 +43,11 @@ def slots(heads):
     return {h["name"]: h["slot"] for h in m.assign_slots(heads)}
 
 
+def strip(text):
+    """The drawing without the colour, for reading words out of."""
+    return re.sub(r"\033\[[0-9;]*m", "", text)
+
+
 print("\na number belongs to a head, not to a row")
 fresh()
 a, b, c = head("ann"), head("bo"), head("cy")
@@ -163,6 +168,28 @@ check("the heading of that group is bright",
       "\033[1;97m group 1" in marked, True)
 check("the other heading is not",
       "\033[1;97m group 2" in marked, False)
+
+print("\na group with nobody in it keeps its heading and its place")
+# A group is a slot you made, not a side effect of who happens to be running.
+# If it disappeared with its last head you could not tell a group you had lost
+# from a head you had lost, and the ranking would come back in an order you
+# never chose. Only `disband` takes one away.
+book = [("1", "group 1"), ("2", "group 2"), ("3", "spare")]
+drawn = m.render(rows, width=90, groups=book)
+heads_of = [l for l in strip(drawn).split("\n") if "─" in l]
+check("the empty group is drawn", any("spare  [3]  empty" in l for l in heads_of),
+      True)
+check("in the place its rank puts it - after 2, before the loose heads",
+      [l.split()[0] for l in heads_of],
+      ["group", "group", "spare", "unassigned"])
+check("and the groups with heads read as they did",
+      sum("empty" in l for l in heads_of), 1)
+
+empty_only = m.render([], width=90, groups=[("4", "later")])
+check("a group with no heads at all is still a heading",
+      "later  [4]  empty" in strip(empty_only), True)
+check("someone who uses no groups still pays no line for them",
+      "─" in strip(m.render([head("solo")], width=90, groups=[])), False)
 
 print("\nthe printed number is the slot, not the row")
 fresh()

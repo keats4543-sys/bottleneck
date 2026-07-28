@@ -224,6 +224,35 @@ def name_group(gid, label):
     return label
 
 
+def disband_group(gid):
+    """Take a group out of the book. Its heads come back unassigned.
+
+    Membership is what keeps a group alive - group_ids() reads the assignments
+    as well as the ranking - so dropping the label and the rank is not enough.
+    Every entry pointing at it has to go, including the ones for sessions that
+    ended weeks ago, or the next listing quietly brings the group back. The
+    claims go the same way: a claim is a group waiting for a head that has not
+    started, and a group that no longer exists should not be waiting for
+    anything.
+
+    Returns how many assignments it let go, or None if there was no such group.
+    """
+    gid = str(gid or "")
+    book = queue_load()
+    if not gid or gid not in group_ids(book):
+        return None
+    freed = [sid for sid, g in book["of"].items() if g == gid]
+    book["of"] = {sid: g for sid, g in book["of"].items() if g != gid}
+    book["order"] = [g for g in book["order"] if g != gid]
+    book["names"].pop(gid, None)
+    queue_save(book)
+    claims = claims_load()
+    kept = {n: v for n, v in claims.items() if str(v.get("group") or "") != gid}
+    if len(kept) != len(claims):
+        write_json(CLAIMS, kept)
+    return len(freed)
+
+
 def move_group(gid, delta):
     """Shift a group up or down the ranking. Returns the new position, 1-based."""
     book = queue_load()

@@ -173,6 +173,108 @@ check("leaving nothing behind", m.claims_load(), {})
 check("an unnamed head cannot be claimed", m.claim_group("", "1"), "")
 check("nothing claimed is no work", m.claims_apply([("any", "sid-5")]), False)
 
+print("\ndisbanding takes a group apart")
+fresh()
+m.set_group("sid-a", "2")
+m.set_group("sid-b", "2")
+m.set_group("sid-c", "1")
+m.name_group("2", "grains")
+m.claim_group("not-up-yet", "2")
+check("it says how many heads it let go", m.disband_group("2"), 2)
+check("the ranking loses it", m.group_ids(m.queue_load()), ["1"])
+check("so does the name book", m.queue_load()["names"], {})
+check("its heads come back unassigned, and nobody else moves",
+      m.queue_load()["of"], {"sid-c": "1"})
+check("a claim waiting on it is torn up too", m.claims_load(), {})
+check("disbanding it again is not an error", m.disband_group("2"), None)
+check("nor is a group that never existed", m.disband_group("9"), None)
+check("nor is no group at all", m.disband_group(""), None)
+
+# The whole reason this is a command and not three edits. A group lives in the
+# assignments as much as in the ranking, so one entry left behind - from a
+# session that ended weeks ago and will never be seen again - is enough to
+# bring the group back on the next listing.
+fresh()
+m.set_group("long-gone", "3")
+book = m.queue_load()
+book["order"] = []
+m.queue_save(book)
+check("an assignment on its own keeps a group alive",
+      m.group_ids(m.queue_load()), ["3"])
+check("disband clears the assignment, not just the rank",
+      m.disband_group("3"), 1)
+check("so it does not come back", m.group_ids(m.queue_load()), [])
+
+fresh()
+m.name_group("4", "later")
+check("a group named before anyone joins it exists",
+      m.group_ids(m.queue_load()), ["4"])
+check("and can be disbanded empty", m.disband_group("4"), 0)
+check("leaving nothing", (m.group_ids(m.queue_load()), m.queue_load()["names"]),
+      ([], {}))
+
+print("\nG then d disbands from the dashboard")
+# The one thing on the group key that is about a group rather than a head, so
+# the one thing that has to work with nothing pointed at: a group whose last
+# head has exited is exactly the group you want rid of, and there is nothing
+# left to select.
+TYPED = []
+
+
+def typing(*keys):
+    """Answer the key prompts in order, and remember what was asked."""
+    keys = list(keys)
+    TYPED.clear()
+
+    def fake(prompt=""):
+        TYPED.append(prompt)
+        return keys.pop(0) if keys else ""
+    m.next_key = fake
+
+
+fresh()
+m.set_group("sid-x", "5")
+m.name_group("5", "grains")
+rows = [head("ann", group="5")]
+typing("d", "5")
+check("it says what it did", m.queue_key("G", rows, "ann"),
+      "grains disbanded - 1 head unassigned")
+check("and the group is gone", m.group_ids(m.queue_load()), [])
+check("the prompt offers the key", "d disbands" in TYPED[0], True)
+check("and the second prompt asks which", "disband which group" in TYPED[1],
+      True)
+
+fresh()
+m.name_group("6", "empty one")
+typing("d", "6")
+check("an empty group says so rather than counting nobody",
+      m.queue_key("G", [], ""), "empty one disbanded - it was empty")
+
+fresh()
+typing("d")
+check("with no groups at all it does not ask which",
+      m.queue_key("G", [], ""), "no groups to disband")
+
+fresh()
+m.name_group("7", "kept")
+typing("d", "\x1b")
+check("escape at the second prompt changes nothing",
+      m.queue_key("G", [], ""), "cancelled")
+check("and the group stands", m.group_ids(m.queue_load()), ["7"])
+
+fresh()
+typing("2")
+check("grouping still needs a head to point at",
+      m.queue_key("G", [], ""), "no head selected - bring one up first")
+check("and nothing was written", m.queue_load()["of"], {})
+
+fresh()
+rows = [head("ann")]
+typing("2")
+check("pointing at one still puts it in a group",
+      m.queue_key("G", rows, "ann"), "ann joins group 2   N names it")
+check("which is what the book says", m.queue_load()["of"], {"ann": "2"})
+
 print("\ncorrupt state is not a crash")
 with open(m.QUEUE, "w") as fh:
     fh.write("{ not json")

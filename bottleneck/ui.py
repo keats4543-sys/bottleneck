@@ -15,9 +15,9 @@ from .panes import (auto_raise, claude_cmd, focus, kill_head, next_or_park,
                     park, pending, reaped, restart_here, send_go, spawn,
                     warm_claude)
 from .store import (assign_slots, auto_enabled, by_slot, claim_group,
-                    clear_attention, group_ids, group_label, mark_seen,
-                    move_group, name_group, queue_load, queue_save, set_auto,
-                    set_group, set_hold)
+                    clear_attention, disband_group, group_ids, group_label,
+                    mark_seen, move_group, name_group, queue_load, queue_save,
+                    set_auto, set_group, set_hold)
 from .tmuxio import (dash_pane, dash_point, dash_register, dash_release,
                      invalidate, pane_in_mode, pane_width, tmux, tmux_say,
                      write_keys_conf)
@@ -136,7 +136,8 @@ def spinner(now=None):
     return SPIN[int(now / max(0.05, SPINUP_TICK)) % len(SPIN)]
 
 
-def render(heads, width=None, note="", auto=None, selected="", loud=False):
+def render(heads, width=None, note="", auto=None, selected="", loud=False,
+           groups=None):
     if width is None:
         try:
             width = os.get_terminal_size().columns
@@ -171,9 +172,38 @@ def render(heads, width=None, note="", auto=None, selected="", loud=False):
 
     # Headings only once groups are in use. Someone who never touches them
     # should not pay a line of height for a feature they are not using.
-    grouped = any(h.get("group") for h in heads)
+    #
+    # A group with nobody in it still gets its heading. It is a slot you made
+    # and named, and the whole point of it is that heads go there - if it
+    # vanished the moment the last one exited you would be left wondering
+    # whether you had lost the group or only the head, and the ranking you set
+    # would come back in an order you never chose. An empty one says so, and
+    # stays where you put it, until you disband it.
+    if groups is None:
+        book = queue_load()
+        groups = [(g, group_label(book, g)) for g in group_ids(book)]
+    order = [g for g, _ in groups]
+    filled = {h.get("group", "") for h in heads if not h.get("elsewhere")}
+    empty = [(g, label) for g, label in groups if g not in filled]
+    grouped = bool(filled - {""} or empty)
     seen_group = object()
     seen_away = False
+
+    def group_heading(gid, label, on, hollow=False):
+        title = (f"{label}  [{gid}]" if gid else "unassigned")
+        if hollow:
+            title += "  empty"
+        rule = "─" * max(0, width - len(title) - 4)
+        colour = ("90" if hollow else
+                  (("1;97" if on else "1;94") if gid else ("97" if on else "90")))
+        return c(colour, f" {title} {rule}")
+
+    def flush_empty(before):
+        """Headings for the empty groups that outrank whatever comes next."""
+        cut = order.index(before) if before in order else len(order)
+        while empty and order.index(empty[0][0]) < cut:
+            gid, label = empty.pop(0)
+            lines.append(group_heading(gid, label, False, hollow=True))
 
     for h in heads:
         # Everything unanswerable is sorted to the end, so one heading here
@@ -183,20 +213,19 @@ def render(heads, width=None, note="", auto=None, selected="", loud=False):
         if h.get("elsewhere") and not seen_away:
             seen_away = True
             seen_group = object()
+            if grouped:
+                flush_empty("")
             title = "elsewhere - watched, not answerable from here"
             rule = "─" * max(0, width - len(title) - 4)
             lines.append(c("90", f" {title} {rule}"))
         if grouped and not h.get("elsewhere") and h.get("group", "") != seen_group:
             seen_group = h.get("group", "")
-            title = (f"{h['group_label']}  [{seen_group}]" if seen_group
-                     else "unassigned")
+            flush_empty(seen_group)
             # The heading of the group you are standing in brightens - enough
             # to keep your bearings after a jump, without a second cursor.
             on_group = pick is not None and pick.get("group", "") == seen_group
-            rule = "─" * max(0, width - len(title) - 4)
-            lines.append(c(("1;97" if on_group else "1;94") if seen_group
-                           else ("97" if on_group else "90"),
-                           f" {title} {rule}"))
+            lines.append(group_heading(seen_group, h.get("group_label", ""),
+                                       on_group))
         i = h.get("slot") or 0
         _, label, colour = STATES[h["state"]]
         mark = c("1;93", "›") if h["attention"] else (c("1;96", "●") if h["in_main"] else " ")
@@ -246,6 +275,8 @@ def render(heads, width=None, note="", auto=None, selected="", loud=False):
         for out in wrap_body(body, width):
             lines.append(c("37" if h["attention"] else "90", out))
 
+    if grouped:
+        flush_empty("")
     if not heads:
         lines.append(c("90", "  no heads yet - press n to start one"))
     if note:
@@ -514,12 +545,59 @@ def queue_key(key, heads, selected=""):
     """
     cur = (next((h for h in heads if h["session_id"] == selected), None)
            or current_head(heads))
-    if not cur:
-        return "no head selected - bring one up first"
     # Everything here is written down against a session id, and a pane that is
     # still starting has none - a group or a hold filed under the pane would be
     # about a head that does not exist, and would still be there once one did.
     # The group asked for at launch is already claimed against the name.
+    usable = cur is not None and not cur.get("pending")
+
+    if key == "G":
+        # Disbanding is the one thing on this key that is about a group rather
+        # than about a head, so it is the one thing here that works with
+        # nothing selected - a group whose last head has exited is exactly the
+        # group you want to be rid of, and there is nothing to point at.
+        book = queue_load()
+        order = group_ids(book)
+        menu = "  ".join(f"{g}:{group_label(book, g)}" for g in order[:6])
+        who = cur["name"] if usable else ""
+        got = next_key((f"group for {who}? [1-9, 0 to clear, d disbands]"
+                        if who else "no head selected - [d disbands a group]")
+                       + (f"   {menu}" if menu else ""))
+        if not got:
+            return "cancelled"
+        if got == "d":
+            if not order:
+                return "no groups to disband"
+            pick = next_key("disband which group? [number]"
+                            + (f"   {menu}" if menu else ""))
+            if not pick or not pick.isdigit():
+                return "cancelled"
+            was = group_label(book, pick)
+            freed = disband_group(pick)
+            if freed is None:
+                return f"no group {pick}"
+            return (f"{was} disbanded - {freed} "
+                    f"head{'' if freed == 1 else 's'} unassigned"
+                    if freed else f"{was} disbanded - it was empty")
+        if not who:
+            return ("no head selected - bring one up first"
+                    if cur is None else
+                    f"{cur['name']} is still starting - wait for it to come up")
+        if got == "0":
+            set_group(cur["session_id"], "")
+            return f"{who} is unassigned"
+        if not got.isdigit():
+            return f"'{got}' is not a group"
+        set_group(cur["session_id"], got)
+        book = queue_load()
+        # A group nobody has named reads as "group 2" everywhere it appears,
+        # which is the moment naming it is worth mentioning - and the moment
+        # you are least likely to go looking for a key that does it.
+        hint = "" if book["names"].get(got) else "   N names it"
+        return f"{who} joins {group_label(book, got)}{hint}"
+
+    if not cur:
+        return "no head selected - bring one up first"
     if cur.get("pending"):
         return f"{cur['name']} is still starting - wait for it to come up"
     sid, name = cur["session_id"], cur["name"]
@@ -530,27 +608,6 @@ def queue_key(key, heads, selected=""):
             return f"{name} is back in the queue"
         set_hold(sid, cur.get("last_ts") or time.time())
         return f"{name} held - it drops below the heads still working"
-
-    if key == "G":
-        book = queue_load()
-        order = group_ids(book)
-        menu = "  ".join(f"{g}:{group_label(book, g)}" for g in order[:6])
-        got = next_key(f"group for {name}? [1-9, 0 to clear]"
-                       + (f"   {menu}" if menu else ""))
-        if not got:
-            return "cancelled"
-        if got == "0":
-            set_group(sid, "")
-            return f"{name} is unassigned"
-        if not got.isdigit():
-            return f"'{got}' is not a group"
-        set_group(sid, got)
-        book = queue_load()
-        # A group nobody has named reads as "group 2" everywhere it appears,
-        # which is the moment naming it is worth mentioning - and the moment
-        # you are least likely to go looking for a key that does it.
-        hint = "" if book["names"].get(got) else "   N names it"
-        return f"{name} joins {group_label(book, got)}{hint}"
 
     if key == "N":
         gid = cur["group"]

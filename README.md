@@ -248,7 +248,9 @@ reprioritising never renumbers the keys you have learned.
 | `N` | name the group this head is in |
 | `[` `]` | move its group up / down the ranking |
 | `bottleneck group <head> <n>` | the same from a shell |
+| `G` `d` `2` | disband group 2 — its heads come back unassigned |
 | `bottleneck group name 2 "release work"` | give a group a label |
+| `bottleneck group disband 2` | the same from a shell |
 | `bottleneck groups` | who is in what, in order |
 | `bottleneck new x -g 2` | start a head already in group 2 |
 
@@ -261,6 +263,18 @@ exactly the same, which is why `G` mentions the key only when the group you just
 joined has no name yet. A name is also enough to make a group real on its own —
 `bottleneck group name 3 "next week"` puts group 3 in the ranking before anyone
 is in it, so you can lay the buckets out first and fill them later.
+
+**Emptying and disbanding.** A group keeps its heading when the last head in it
+exits, and says `empty`. It is a bucket you made and ranked, not a side effect of
+who happens to be running, and a group that vanished with its last head would
+leave you unable to tell a group you had lost from a head you had lost — and
+would come back later in an order you never chose. `G` `d` takes one apart for
+good: the heads in it come back unassigned, the label and the rank go, and so do
+the assignments for sessions that ended long ago and any claim still waiting on
+it. That last part is why it is a command and not three edits — a group lives in
+its assignments as much as in its ranking, so one stale entry left behind is
+enough to bring it back on the next listing. `d` works with nothing selected,
+which is the state you are usually in when you want it.
 
 **Grouping a head as you start it.** `bottleneck new -g 2` puts the new head in
 group 2, and `n` in the dashboard asks which group after it asks the name —
@@ -565,6 +579,7 @@ bottleneck name <n> <s>  rename a session in the catalogue, and pin it
 bottleneck unpin <n>    let the name it runs under win again
 bottleneck group <n> <g>  put head n in group g ("none" to clear)
 bottleneck groups       who is in what, in priority order
+bottleneck group disband <g>  take a group apart, freeing its heads
 bottleneck claim <name> <g>  group a head that has not started yet
 bottleneck hold <n>     done, but not now - sorts below working heads
 bottleneck unhold <n>   put it back in the queue

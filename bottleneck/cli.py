@@ -16,8 +16,9 @@ from .panes import (auto_raise, claude_cmd, focus, kill_head, next_or_park,
 from .tmuxio import write_keys_conf
 from .procs import claude_procs, kill_pid, proc_start
 from .store import (assign_slots, auto_enabled, buried_load, by_slot,
-                    claim_group, clear_attention, grave_stale, group_ids,
-                    group_label, group_rank, mark_seen, move_group, name_group,
+                    claim_group, clear_attention, disband_group, grave_stale,
+                    group_ids, group_label, group_rank, mark_seen, move_group,
+                    name_group,
                     queue_load, queue_save, set_auto, set_group, set_hold,
                     unbury)
 from .transcript import transcript_for
@@ -78,6 +79,7 @@ hidden windows; picking one moves its pane in beside the dashboard.
   bottleneck group <n> <g> put head n in a priority group ("none" to clear)
   bottleneck groups        who is in what, in priority order
   bottleneck group name <n> <label>   call a group something
+  bottleneck group disband <n>        take a group apart, freeing its heads
   bottleneck claim <name> <g>  group a head that has not started yet
   bottleneck hold <n>      done, but sorts below the heads still working
 
@@ -88,6 +90,7 @@ Single keys in the dashboard - no prefix:
   x kill head           c clear flags              g go to head pane   q quit
   a toggle auto-raise   R reload after editing the checkout
   G group this head     N name that group     [ ] move it up/down
+  G then d disbands a group by number
   h hold it back
 
 The number on a row belongs to the head, not the row: the queue reorders itself
@@ -365,6 +368,17 @@ def main(argv):
             print(f"group {rest[1]} is now {label}" if label
                   else f"group {rest[1]} goes back to its number")
             return 0
+        if rest[0] == "disband" and len(rest) >= 2:
+            gid = str(rest[1])
+            was = group_label(book, gid)
+            freed = disband_group(gid)
+            if freed is None:
+                print(f"no group {gid}", file=sys.stderr)
+                return 1
+            print(f"{was} disbanded"
+                  + (f" - {freed} head{'' if freed == 1 else 's'} unassigned"
+                     if freed else " - it was empty"))
+            return 0
         if rest[0] in ("up", "down") and len(rest) >= 2:
             at = move_group(rest[1], -1 if rest[0] == "up" else 1)
             if not at:
@@ -375,6 +389,7 @@ def main(argv):
         if len(rest) < 2:
             print("usage: bottleneck group <head> <n|none>\n"
                   "       bottleneck group name <n> <label>\n"
+                  "       bottleneck group disband <n>\n"
                   "       bottleneck group up|down <n>", file=sys.stderr)
             return 2
         target = by_slot(heads, rest[0]) if rest[0].isdigit() else None
