@@ -226,7 +226,7 @@ def typing(*keys):
     keys = list(keys)
     TYPED.clear()
 
-    def fake(prompt=""):
+    def fake(prompt="", timeout=5.0, enter=False):
         TYPED.append(prompt)
         return keys.pop(0) if keys else ""
     m.next_key = fake
@@ -310,6 +310,46 @@ saying("")
 check("but backing out of a new one leaves nothing behind",
       m.queue_key("G", [], ""), "cancelled")
 check("no group 9", "9" in m.group_ids(m.queue_load()), False)
+
+print("\nthe group keys know which group you are standing in")
+# Ranking knew where the cursor was and the rest did not, which meant typing a
+# number you could already see on the screen.
+fresh()
+m.set_group("ann", "2")
+m.name_group("1", "meta")
+m.name_group("2", "ml4t")
+rows = [head("ann", group="2")]
+typing("d", "\r")
+check("Enter at the picker takes the group you are in",
+      m.queue_key("G", rows, "ann"), "ml4t disbanded - 1 head unassigned")
+check("and the prompt said so before you pressed it",
+      "⏎ for ml4t" in TYPED[1], True)
+
+fresh()
+m.set_group("ann", "2")
+m.name_group("1", "meta")
+m.name_group("2", "ml4t")
+typing("r", "\r")
+saying("release work")
+check("rename takes it the same way",
+      m.queue_key("G", rows, "ann"), "group 2 is release work")
+
+typing("r", "1")
+saying("later")
+check("a digit still says a different one",
+      m.queue_key("G", rows, "ann"), "group 1 is later")
+
+typing("d", "")
+check("but nothing pressed is still cancelled, not the default",
+      m.queue_key("G", rows, "ann"), "cancelled")
+check("and both groups are still there",
+      sorted(m.group_ids(m.queue_load())), ["1", "2"])
+
+typing("d")
+check("with nothing selected there is no default to offer",
+      m.queue_key("G", [], ""), "cancelled")
+check("and the prompt does not pretend there is",
+      "⏎ for" in TYPED[1], False)
 
 print("\nG then p hands the arrows to the ranking")
 UP, DOWN = "\x1b[A", "\x1b[B"

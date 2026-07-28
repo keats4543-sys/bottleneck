@@ -249,8 +249,8 @@ reprioritising never renumbers the keys you have learned.
 | `G` `2` | put this head in group 2 |
 | `G` `0` | take it out |
 | `N` | name the group this head is in |
-| `G` `r` `2` | name group 2, whether or not you are in it |
-| `G` `d` `2` | disband group 2 — its heads come back unassigned |
+| `G` `r` `⏎` | name the group you are standing in — a digit names another |
+| `G` `d` `⏎` | disband it — its heads come back unassigned |
 | `[` `]` | move the group you are in up / down the ranking |
 | `G` `p` | the arrows move a group through the list — `⏎` sets it, `esc` puts it back |
 | `bottleneck group <head> <n>` | the same from a shell |
@@ -261,8 +261,8 @@ reprioritising never renumbers the keys you have learned.
 | `bottleneck new x -g 2` | start a head already in group 2 |
 
 **Naming a group.** `N` calls the group the selected head is in something, and
-`G` `r` asks for a number first, so it also reaches a group you are not in and
-one with nobody in it at all. Either way the label stands in for the number in
+`G` `r` asks which group — offering that same one on Enter, so a digit is only
+needed for a group you are not in or one with nobody in it at all. Either way the label stands in for the number in
 the group heading, in the `G` menu and in `bottleneck groups`, so a queue reads
 `release work` and `reviews` rather than
 `group 1` and `group 2`. Enter alone keeps the name it had, `-` hands the number
@@ -282,8 +282,10 @@ good: the heads in it come back unassigned, the label and the rank go, and so do
 the assignments for sessions that ended long ago and any claim still waiting on
 it. That last part is why it is a command and not three edits — a group lives in
 its assignments as much as in its ranking, so one stale entry left behind is
-enough to bring it back on the next listing. `d` works with nothing selected,
-which is the state you are usually in when you want it.
+enough to bring it back on the next listing. `d` offers the group you are standing in on Enter, like `r`, and works with
+nothing selected at all — which is the state you are usually in when you want
+it. It asks even when it has a default: disbanding should cost one keystroke
+more than ranking does.
 
 **Reordering.** `[` and `]` move the group you are standing in one place up or
 down. `G` `p` hands the arrows to the ranking instead: the marked group and its

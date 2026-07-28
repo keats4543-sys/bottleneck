@@ -410,12 +410,17 @@ def quit_press(quitting, now=None):
 RESTART = "restart"
 
 
-def next_key(prompt="", timeout=5.0):
+def next_key(prompt="", timeout=5.0, enter=False):
     """One keystroke, no Enter. Empty if you wait too long or change your mind.
 
     Raw and unbuffered, like the main loop: an arrow pressed at this prompt
     arrives as three bytes, and taking one of them through sys.stdin would leave
     the other two to turn up later as keys nobody pressed.
+
+    `enter` is for a prompt that offers a default. Enter has to come back as
+    itself there, or taking the answer already on the screen would be
+    indistinguishable from changing your mind - which is the one confusion a
+    default cannot afford.
     """
     import select as _sel
     if prompt:
@@ -426,6 +431,8 @@ def next_key(prompt="", timeout=5.0):
     if not _sel.select([sys.stdin], [], [], timeout)[0]:
         return ""
     key, _ = split_key(os.read(sys.stdin.fileno(), 64).decode("utf-8", "replace"))
+    if enter and key in ("\r", "\n"):
+        return "\r"
     if len(key) != 1 or key in ("\x1b", "\x03", "\r", "\n"):
         return ""              # an arrow or Esc here means "changed my mind"
     return key
@@ -573,6 +580,24 @@ def rename_group(gid, fresh=False):
 RANK = "\0rank\0"          # queue_key's way of saying "hand me the arrows"
 
 
+def pick_group(verb, here, book, menu):
+    """Which group to act on: the one you are standing in, or another.
+
+    Ranking knows where the cursor is, and the rest of the group keys had no
+    excuse not to. So the group of the selected head is the answer already on
+    the prompt, Enter takes it, and a digit says a different one. Empty means
+    you changed your mind - which is why Enter has to come back distinct from
+    Esc here, and why this asks even when it has a default: disbanding is two
+    keystrokes from a lot of ranking, and it should cost one more.
+    """
+    hint = f", ⏎ for {group_label(book, here)}" if here else ""
+    got = next_key(f"{verb} which group? [number{hint}]"
+                   + (f"   {menu}" if menu else ""), enter=bool(here))
+    if got == "\r":
+        return here
+    return got if got.isdigit() else ""
+
+
 def rank_start(gid, order):
     """Enter ranking on gid, or on the first group when it is in none."""
     if not order:
@@ -655,9 +680,9 @@ def queue_key(key, heads, selected=""):
             verb = "disband" if got == "d" else "rename"
             if not order and got == "d":
                 return "no groups to disband"
-            pick = next_key(f"{verb} which group? [number]"
-                            + (f"   {menu}" if menu else ""))
-            if not pick or not pick.isdigit():
+            pick = pick_group(verb, cur.get("group", "") if cur else "",
+                              book, menu)
+            if not pick:
                 return "cancelled"
             if got == "d":
                 was = group_label(book, pick)
