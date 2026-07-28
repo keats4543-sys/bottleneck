@@ -12,6 +12,7 @@ is the only one that can tell whose Alt+j it was.
 import os
 
 from harness import bn as m
+from bottleneck import tmuxio
 
 CALLS = []          # every tmux() and tmux_many() we made
 HINT = [""]         # what tmux currently has in the pointer option
@@ -33,6 +34,10 @@ def fake_many(*cmds):
     CALLS.append(("MANY", tuple(c[-2] for c in cmds)))
     return None
 
+
+# Kept before the stub below takes its place: the last section tests the real
+# one, and the harness sets a name on every module that has it.
+REAL_DASH_HINT = tmuxio.dash_hint
 
 m.tmux = fake_tmux
 m.tmux_many = fake_many
@@ -137,6 +142,36 @@ check("and leaves nothing pointing anywhere", HINT[0], "")
 setup(hint="", claimed={"%4": {}})
 m.dash_point("")
 check("a dashboard outside tmux aims nothing", CALLS, [])
+
+print()
+print("and asking tmux where the keys point is not a thing to do every refresh")
+# The check above is idempotent and cheap to make and was costing a fork, an
+# exec and a socket round-trip - about 7ms - every two seconds, to be told what
+# tmux said last time. What it watches for is a second dashboard appearing,
+# which a few seconds late is still settling either way.
+ASKED = [0]
+
+
+def counted(*args):
+    ASKED[0] += 1
+    return "%9"
+
+
+tmuxio.tmux_out = counted
+tmuxio._steady.clear()
+
+check("the first refresh asks", (REAL_DASH_HINT(), ASKED[0]), ("%9", 1))
+check("the next several do not",
+      ([REAL_DASH_HINT() for _ in range(20)][-1], ASKED[0]), ("%9", 1))
+tmuxio.invalidate()
+check("and a pane moving does not make it a question again - "
+      "this is not about panes", (REAL_DASH_HINT(), ASKED[0]), ("%9", 1))
+tmuxio.steady_set("dash_hint", "%3")
+check("what we write, we know without asking",
+      (REAL_DASH_HINT(), ASKED[0]), ("%3", 1))
+tmuxio._steady["dash_hint"] = (-1e9, "%3")         # older than the window
+check("and it is asked again once the window is up",
+      (REAL_DASH_HINT(), ASKED[0]), ("%9", 2))
 
 print()
 print("all pass" if not FAILED else f"{len(FAILED)} FAILED")

@@ -186,5 +186,32 @@ run("2")
 check("a slot key opens by number", FOCUSED, ["two"])
 check("and reads the list again", COLLECTS[0], 2)
 
+print("\na key that acts is answered before the refresh, not after it")
+# Same complaint as the arrows, one step along: the key was acted on at once,
+# and the note saying so waited for the top of the next cycle - a full refresh
+# behind it, which is the whole delay between pressing a key and being told
+# anything happened. Nothing that refresh reads changes what the note says.
+ORDER = []
+m.collect = lambda: (ORDER.append("collect"), counted_collect())[1]
+m.paint = lambda text: (ORDER.append("paint"),
+                        PAINTS.append(text.split(":", 1)[1].split("\n")[0]))[0]
+NOTES = []
+m.render = lambda heads, **kw: (NOTES.append(kw.get("note", "")),
+                                f"frame:{kw.get('selected', '')}")[1]
+
+ORDER.clear()
+run("c")
+check("the answer is painted before the list is read again",
+      ORDER[:4], ["collect", "paint", "paint", "collect"])
+check("and it is the note the key produced",
+      NOTES[1], "cleared all flags")
+check("which is still there on the frame after the refresh",
+      NOTES[2], "cleared all flags")
+
+ORDER.clear()
+run(DOWN)
+check("an arrow still costs one paint and no read",
+      ORDER[:3], ["collect", "paint", "paint"])
+
 print("\nall pass" if not FAILED else f"\n{len(FAILED)} FAILED")
 raise SystemExit(1 if FAILED else 0)

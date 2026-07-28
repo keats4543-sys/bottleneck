@@ -82,6 +82,38 @@ def invalidate():
     _cache.clear()
 
 
+# A second cache, for the answers that are not about where the panes are.
+#
+# The one above is dropped at the top of every cycle, which is right for a pane
+# listing: a head may have moved since, and a stale one puts a row in the wrong
+# place. It is wrong for a fact about the tmux server itself, which changes when
+# a dashboard starts or stops and at no other time - and asking tmux costs a
+# fork, an exec and a socket round-trip, about 7ms, spent every two seconds
+# to be told what it said last time.
+#
+# So these are kept across cycles and re-asked on their own clock. Anything
+# here has to be something a few seconds of staleness cannot misplace, and
+# anything that writes one of them says so rather than waiting to be told.
+STEADY_TTL = 5.0
+
+_steady = {}
+
+
+def steady(key, make, ttl=STEADY_TTL):
+    hit = _steady.get(key)
+    now = time.monotonic()
+    if hit is not None and now - hit[0] < ttl:
+        return hit[1]
+    val = make()
+    _steady[key] = (now, val)
+    return val
+
+
+def steady_set(key, val):
+    """Record what we have just made true, instead of asking about it next."""
+    _steady[key] = (time.monotonic(), val)
+
+
 def tmux_say(text):
     tmux("display-message", text)
 
@@ -311,8 +343,15 @@ def dash_release(pane):
 
 
 def dash_hint():
-    """The pane the tmux bindings currently aim at, as tmux has it."""
-    return tmux_out("show", "-svq", DASH_OPT)
+    """The pane the tmux bindings currently aim at, as tmux has it.
+
+    Asked on the steady clock rather than every refresh. It changes when a
+    second dashboard appears or the last one goes, which is the one thing
+    dash_point is watching for - and dash_point is documented as settling
+    either way as dashboards come and go, which a few seconds late is still.
+    Every write below records what it wrote, so the common case never asks.
+    """
+    return steady("dash_hint", lambda: tmux_out("show", "-svq", DASH_OPT))
 
 
 # The keys that move you around used to start a program to work out where the
@@ -508,6 +547,7 @@ def dash_point(pane):
     if alone and aimed != pane:
         bind_all(dash_keys(pane))
         tmux("set", "-s", DASH_OPT, pane)
+        steady_set("dash_hint", pane)
     elif not alone and aimed:
         dash_unpoint()
 
@@ -516,6 +556,7 @@ def dash_unpoint():
     """Put the keys back to finding the dashboard the slow way."""
     bind_all(FALLBACK_KEYS)
     tmux("set", "-s", "-u", DASH_OPT)
+    steady_set("dash_hint", "")
 
 
 def dash_alive(entry):

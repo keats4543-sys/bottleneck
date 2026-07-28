@@ -1483,6 +1483,23 @@ def watch():
                     note = said
                     held = None
                     break
+
+            # The key has been dealt with, and the screen still shows the frame
+            # it was pressed on. Answering it takes a redraw, and the redraw at
+            # the top of the cycle is behind a full refresh - tmux asked where
+            # every pane is, every transcript read again - none of which the
+            # answer depends on. Measured at 44ms for two heads and rising with
+            # the fleet, which is the delay between pressing h and being told
+            # anything happened.
+            #
+            # So the note is painted here, onto the list already in hand. The
+            # refresh still happens, immediately, and lands with the row in its
+            # new place; this is the acknowledgement, and it costs a render.
+            # The same trick the arrows have always used, for every other key.
+            if note:
+                paint(render(heads, width=width, note=note, auto=auto,
+                             selected=picked, loud=bool(quitting),
+                             prioritizing=prioritizing))
     except KeyboardInterrupt:
         return 0
     finally:
