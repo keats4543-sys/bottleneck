@@ -246,23 +246,27 @@ reprioritising never renumbers the keys you have learned.
 | `G` `2` | put this head in group 2 |
 | `G` `0` | take it out |
 | `N` | name the group this head is in |
+| `G` `r` `2` | name group 2, whether or not you are in it |
+| `G` `d` `2` | disband group 2 — its heads come back unassigned |
 | `[` `]` | move its group up / down the ranking |
 | `bottleneck group <head> <n>` | the same from a shell |
-| `G` `d` `2` | disband group 2 — its heads come back unassigned |
 | `bottleneck group name 2 "release work"` | give a group a label |
 | `bottleneck group disband 2` | the same from a shell |
 | `bottleneck groups` | who is in what, in order |
 | `bottleneck new x -g 2` | start a head already in group 2 |
 
-**Naming a group.** `N` calls the group the selected head is in something — the
-label then stands in for the number in the group heading, in the `G` menu and in
-`bottleneck groups`, so a queue reads `release work` and `reviews` rather than
+**Naming a group.** `N` calls the group the selected head is in something, and
+`G` `r` asks for a number first, so it also reaches a group you are not in and
+one with nobody in it at all. Either way the label stands in for the number in
+the group heading, in the `G` menu and in `bottleneck groups`, so a queue reads
+`release work` and `reviews` rather than
 `group 1` and `group 2`. Enter alone keeps the name it had, `-` hands the number
 back. Nothing has to be named: an unnamed group reads as `group 2` and works
 exactly the same, which is why `G` mentions the key only when the group you just
 joined has no name yet. A name is also enough to make a group real on its own —
-`bottleneck group name 3 "next week"` puts group 3 in the ranking before anyone
-is in it, so you can lay the buckets out first and fill them later.
+`bottleneck group name 3 "next week"`, or `G` `r` `3`, puts group 3 in the
+ranking before anyone is in it, so you can lay the buckets out first and fill
+them later.
 
 **Emptying and disbanding.** A group keeps its heading when the last head in it
 exits, and says `empty`. It is a bucket you made and ranked, not a side effect of

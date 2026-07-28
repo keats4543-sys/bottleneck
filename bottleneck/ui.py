@@ -536,6 +536,29 @@ def jump_group(heads, picked, step):
     return next(h for h in heads if h.get("group", "") == want)["session_id"]
 
 
+def rename_group(gid, fresh=False):
+    """Ask for a group's label and write it. Returns the line to show.
+
+    Both ways in end up here - N, which names the group the selected head is
+    in, and G r, which names one by number - so the two cannot drift into
+    answering Enter or a bare dash differently.
+    """
+    was = queue_load()["names"].get(gid, "")
+    label = ask(f"name for group {gid}"
+                + (f" [{was}]" if was else "") + ", - to clear: ").strip()
+    if not label:
+        # Enter is "changed my mind", not "call it nothing" - clearing a name
+        # you typed on purpose should take saying so.
+        if was:
+            return f"group {gid} keeps {was}"
+        return "cancelled"
+    if label == "-":
+        name_group(gid, "")
+        return f"group {gid} goes back to its number"
+    name_group(gid, label)
+    return f"{'new ' if fresh else ''}group {gid} is {label}"
+
+
 def queue_key(key, heads, selected=""):
     """The group and hold keys. Returns the line to show; never raises.
 
@@ -552,33 +575,41 @@ def queue_key(key, heads, selected=""):
     usable = cur is not None and not cur.get("pending")
 
     if key == "G":
-        # Disbanding is the one thing on this key that is about a group rather
-        # than about a head, so it is the one thing here that works with
-        # nothing selected - a group whose last head has exited is exactly the
-        # group you want to be rid of, and there is nothing to point at.
+        # Renaming and disbanding are the two things on this key that are about
+        # a group rather than about a head, so they are the two things here
+        # that work with nothing selected - an empty group is exactly the one
+        # you want to name or be rid of, and it has no head to point at.
         book = queue_load()
         order = group_ids(book)
         menu = "  ".join(f"{g}:{group_label(book, g)}" for g in order[:6])
         who = cur["name"] if usable else ""
-        got = next_key((f"group for {who}? [1-9, 0 to clear, d disbands]"
-                        if who else "no head selected - [d disbands a group]")
+        got = next_key((f"group for {who}? [1-9, 0 clears, r renames, "
+                        "d disbands]" if who else
+                        "no head selected - [r renames, d disbands a group]")
                        + (f"   {menu}" if menu else ""))
         if not got:
             return "cancelled"
-        if got == "d":
-            if not order:
+        if got in ("d", "r"):
+            verb = "disband" if got == "d" else "rename"
+            if not order and got == "d":
                 return "no groups to disband"
-            pick = next_key("disband which group? [number]"
+            pick = next_key(f"{verb} which group? [number]"
                             + (f"   {menu}" if menu else ""))
             if not pick or not pick.isdigit():
                 return "cancelled"
-            was = group_label(book, pick)
-            freed = disband_group(pick)
-            if freed is None:
-                return f"no group {pick}"
-            return (f"{was} disbanded - {freed} "
-                    f"head{'' if freed == 1 else 's'} unassigned"
-                    if freed else f"{was} disbanded - it was empty")
+            if got == "d":
+                was = group_label(book, pick)
+                freed = disband_group(pick)
+                if freed is None:
+                    return f"no group {pick}"
+                return (f"{was} disbanded - {freed} "
+                        f"head{'' if freed == 1 else 's'} unassigned"
+                        if freed else f"{was} disbanded - it was empty")
+            # A number nobody has used yet is not a mistake. A name is enough
+            # to make a group real - it is how you lay the buckets out before
+            # there is anything to put in them - so this says it made one
+            # rather than refusing.
+            return rename_group(pick, fresh=pick not in order)
         if not who:
             return ("no head selected - bring one up first"
                     if cur is None else
@@ -613,18 +644,7 @@ def queue_key(key, heads, selected=""):
         gid = cur["group"]
         if not gid:
             return f"{name} is not in a group - press G first"
-        was = queue_load()["names"].get(gid, "")
-        label = ask(f"name for group {gid}"
-                    + (f" [{was}]" if was else "") + ", - to clear: ").strip()
-        if not label:
-            # Enter is "changed my mind", not "call it nothing" - clearing a
-            # name you typed on purpose should take saying so.
-            return f"group {gid} keeps {was}" if was else "cancelled"
-        if label == "-":
-            name_group(gid, "")
-            return f"group {gid} goes back to its number"
-        name_group(gid, label)
-        return f"group {gid} is {label}"
+        return rename_group(gid)
 
     # [ and ] - move this head's whole group up or down the ranking.
     if not cur["group"]:

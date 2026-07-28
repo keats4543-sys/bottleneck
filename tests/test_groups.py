@@ -262,6 +262,62 @@ check("escape at the second prompt changes nothing",
       m.queue_key("G", [], ""), "cancelled")
 check("and the group stands", m.group_ids(m.queue_load()), ["7"])
 
+print("\nG then r names a group by number, with or without a head")
+SAID = []
+
+
+def saying(answer):
+    """Answer the one line-prompt, and remember what it asked."""
+    SAID.clear()
+
+    def fake(prompt=""):
+        SAID.append(prompt)
+        return answer
+    m.ask = fake
+
+
+fresh()
+m.name_group("5", "grains")
+typing("r", "5")
+saying("metals")
+check("it renames the group you name, not the one you are in",
+      m.queue_key("G", [], ""), "group 5 is metals")
+check("which is what the book says", m.queue_load()["names"], {"5": "metals"})
+check("the prompt shows the name it had", "[grains]" in SAID[0], True)
+
+typing("r", "5")
+saying("")
+check("Enter keeps the name rather than clearing it",
+      m.queue_key("G", [], ""), "group 5 keeps metals")
+typing("r", "5")
+saying("-")
+check("a bare dash hands the number back",
+      m.queue_key("G", [], ""), "group 5 goes back to its number")
+check("and the group is still there, unnamed",
+      (m.group_ids(m.queue_load()), m.queue_load()["names"]), (["5"], {}))
+
+# A name is enough to make a group real - it is how you lay the buckets out
+# before there is anything to put in them.
+typing("r", "8")
+saying("next week")
+check("naming a number nobody has used makes that group",
+      m.queue_key("G", [], ""), "new group 8 is next week")
+check("and it takes its place in the ranking",
+      m.group_ids(m.queue_load()), ["5", "8"])
+
+typing("r", "9")
+saying("")
+check("but backing out of a new one leaves nothing behind",
+      m.queue_key("G", [], ""), "cancelled")
+check("no group 9", "9" in m.group_ids(m.queue_load()), False)
+
+fresh()
+m.set_group("sid-n", "1")
+rows = [head("ann", group="1")]
+saying("release work")
+check("N still names the group the selected head is in",
+      m.queue_key("N", rows, "ann"), "group 1 is release work")
+
 fresh()
 typing("2")
 check("grouping still needs a head to point at",

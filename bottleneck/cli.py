@@ -18,9 +18,8 @@ from .procs import claude_procs, kill_pid, proc_start
 from .store import (assign_slots, auto_enabled, buried_load, by_slot,
                     claim_group, clear_attention, disband_group, grave_stale,
                     group_ids, group_label, group_rank, mark_seen, move_group,
-                    name_group,
-                    queue_load, queue_save, set_auto, set_group, set_hold,
-                    unbury)
+                    name_group, queue_load, queue_save, set_auto, set_group,
+                    set_hold, unbury)
 from .transcript import transcript_for
 from .tmuxio import (dash_pane, pane_window, tmux, tmux_out, tmux_say)
 from .ui import (HELP, RESTART, bar_text, ordinal, render, render_sessions,
@@ -90,7 +89,7 @@ Single keys in the dashboard - no prefix:
   x kill head           c clear flags              g go to head pane   q quit
   a toggle auto-raise   R reload after editing the checkout
   G group this head     N name that group     [ ] move it up/down
-  G then d disbands a group by number
+  G then r renames a group by number, G then d disbands it
   h hold it back
 
 The number on a row belongs to the head, not the row: the queue reorders itself
