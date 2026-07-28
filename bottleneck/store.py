@@ -148,7 +148,7 @@ def clear_attention(sid):
 #
 # A group is a bucket of heads with a priority. Buckets are keyed by digit, so
 # assigning is G then a number, and the order is a separate list, so you can
-# reprioritise a group without renumbering the keys people have learned. The
+# reprioritize a group without renumbering the keys people have learned. The
 # list sorts by group before it sorts by need, which is what makes the go-on key
 # finish one group before it offers you the next: the second group's waiting
 # heads simply come later in the list.

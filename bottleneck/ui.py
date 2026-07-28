@@ -137,7 +137,7 @@ def spinner(now=None):
 
 
 def render(heads, width=None, note="", auto=None, selected="", loud=False,
-           groups=None, prioritising=""):
+           groups=None, prioritizing=""):
     if width is None:
         try:
             width = os.get_terminal_size().columns
@@ -195,7 +195,7 @@ def render(heads, width=None, note="", auto=None, selected="", loud=False,
             title += "  empty"
         # The group being moved is marked and lit wherever it lands, because
         # the whole of what you are watching is where it lands.
-        moving = bool(gid) and gid == prioritising
+        moving = bool(gid) and gid == prioritizing
         lead = "▸" if moving else " "
         rule = "─" * max(0, width - len(title) - 4)
         colour = ("1;93" if moving else
@@ -601,12 +601,12 @@ def pick_group(verb, here, book, menu):
 def priority_start(gid, order):
     """Start on gid, or on the first group when the head is in none."""
     if not order:
-        return "no groups to prioritise"
+        return "no groups to prioritize"
     return PRIORITY + (gid if gid in order else order[0])
 
 
 def priority_press(key, gid, was):
-    """One key while a group is being prioritised.
+    """One key while a group is being prioritized.
 
     Returns the note to show, the group still being moved - empty once it is
     over - and the order to put back if it is not over yet. Esc restores the
@@ -638,7 +638,7 @@ def priority_press(key, gid, was):
 
 def priority_note(gid):
     """What the keys do, said while they are doing it."""
-    return (f"prioritising {group_label(queue_load(), gid)} - "
+    return (f"prioritizing {group_label(queue_load(), gid)} - "
             "↑↓ move  1-9 pick  ⏎ set  esc undo")
 
 
@@ -658,7 +658,7 @@ def queue_key(key, heads, selected=""):
     usable = cur is not None and not cur.get("pending")
 
     if key == "G":
-        # Naming, prioritising and disbanding are the things on this key that
+        # Naming, prioritizing and disbanding are the things on this key that
         # are about a group rather than about a head, so they are the things
         # here that work with nothing selected - an empty group is exactly the
         # one you want to name, move or be rid of, with no head to point at.
@@ -1034,7 +1034,7 @@ def watch():
     picked = ""        # session id the arrow keys are on
     typed = ""         # bytes the terminal sent that we have not read yet
     quitting = 0.0     # when q was pressed, while the answer is still open
-    prioritising = ""  # group the arrows are moving, while they are moving it
+    prioritizing = ""  # group the arrows are moving, while they are moving it
     priority_undo = None   # the order it had before, for esc
     try:
         # The alternate screen, because this is a screen and not a transcript.
@@ -1106,18 +1106,18 @@ def watch():
             # line is cleared after each redraw, and a mode whose instructions
             # scrolled away a second in would be a mode you were left guessing
             # at with the keys already taken.
-            if prioritising:
-                if prioritising in group_ids(queue_load()):
-                    note = priority_note(prioritising)
+            if prioritizing:
+                if prioritizing in group_ids(queue_load()):
+                    note = priority_note(prioritizing)
                 else:
-                    prioritising, priority_undo = "", None
+                    prioritizing, priority_undo = "", None
             # Asked of tmux rather than of the terminal, and asked here rather
             # than at the top of the cycle: a raise or a head exiting has just
             # changed how wide this pane is, and the layout tmux has settled on
             # is the one this frame has to be drawn for. See pane_width.
             frame = render(heads, width=pane_width(me) or None, note=note,
                            auto=auto_enabled(), selected=picked,
-                           loud=bool(quitting), prioritising=prioritising)
+                           loud=bool(quitting), prioritizing=prioritizing)
             if raw:
                 frame += "\n\n" + c("90", "  " + HELP)
             # Anything that arrived while the frame was being built is about
@@ -1179,12 +1179,12 @@ def watch():
                 if quitting and key != "q":
                     quitting = 0.0
 
-                # While a group is being prioritised the keys are its own, and
+                # While a group is being prioritized the keys are its own, and
                 # every one of them ends the frame - that redraw, with the
                 # group somewhere else in the list, is the answer to the press.
-                if prioritising:
-                    note, prioritising, priority_undo = priority_press(
-                        key, prioritising, priority_undo)
+                if prioritizing:
+                    note, prioritizing, priority_undo = priority_press(
+                        key, prioritizing, priority_undo)
                     break
 
                 if key.startswith("\x1b") and len(key) > 1:
@@ -1243,7 +1243,7 @@ def watch():
                     note = queue_key(key, heads, picked)
                     held = None
                     if note.startswith(PRIORITY):
-                        prioritising, note = note[len(PRIORITY):], ""
+                        prioritizing, note = note[len(PRIORITY):], ""
                         # The order as it stands, not as the file spells it: a
                         # group can be in use without being listed, and putting
                         # back a line that never mentioned it would put it

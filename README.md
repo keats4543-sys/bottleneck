@@ -136,7 +136,7 @@ Single keys in the dashboard pane, no prefix:
 | `G` | put this head in a group — then a digit, `0` to clear |
 | `N` | name that group — a label instead of a number, `-` to clear |
 | `[` `]` | move its group up / down the priority order |
-| `G` `p` `r` `d` | prioritise, name or disband any group — not only the one you are in |
+| `G` `p` `r` `d` | prioritize, name or disband any group — not only the one you are in |
 | `h` | hold this head — done, but below the heads still working |
 | `c` | clear all attention flags |
 | `R` | reload — hand the pane to the current code (see below) |
@@ -243,7 +243,7 @@ order. The
 list sorts by group before it sorts by need, so the go-on key clears the first
 group before it offers you anything from the second — however long the second
 has been waiting. Groups are keyed by digit and ranked by a separate list, so
-reprioritising never renumbers the keys you have learned.
+reprioritizing never renumbers the keys you have learned.
 
 | | |
 |---|---|

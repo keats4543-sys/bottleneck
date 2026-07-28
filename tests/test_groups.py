@@ -412,7 +412,7 @@ check("a group disbanded under the ranking ends it quietly",
 fresh()
 typing("p")
 check("with no groups there is nothing to rank",
-      m.queue_key("G", [], ""), "no groups to prioritise")
+      m.queue_key("G", [], ""), "no groups to prioritize")
 
 fresh()
 m.set_group("sid-p", "1")

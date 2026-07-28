@@ -185,8 +185,8 @@ check("in the place its rank puts it - after 2, before the loose heads",
 check("and the groups with heads read as they did",
       sum("empty" in l for l in heads_of), 1)
 
-print("\nthe group being prioritised is marked wherever it lands")
-moving = m.render(rows, width=90, groups=book, prioritising="2")
+print("\nthe group being prioritized is marked wherever it lands")
+moving = m.render(rows, width=90, groups=book, prioritizing="2")
 lines = [l for l in strip(moving).split("\n") if "─" in l]
 check("it wears the mark", [l[0] for l in lines], [" ", "▸", " ", " "])
 check("and is lit rather than dim", "\033[1;93m▸group 2" in moving, True)
