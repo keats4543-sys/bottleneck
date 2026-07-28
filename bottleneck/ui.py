@@ -521,6 +521,21 @@ def group_keys(heads):
     return out
 
 
+def selection_frame(heads, width, picked, auto, raw):
+    """The list exactly as it stands, with the cursor on a different row.
+
+    Moving the cursor changes which row is drawn bright and nothing else. The
+    heads are the ones the frame on screen was built from, the width is the one
+    it was laid out to, and neither can have moved since - so an arrow does not
+    have to go back through collect() to be answered, and on a loaded machine
+    that is the whole of the delay. See the wait loop.
+    """
+    frame = render(heads, width=width, note="", auto=auto, selected=picked)
+    if raw:
+        frame += "\n\n" + c("90", "  " + HELP)
+    return frame
+
+
 def move_selection(heads, picked, step):
     """Up and down: the next row, wherever it is.
 
@@ -1115,8 +1130,10 @@ def watch():
             # than at the top of the cycle: a raise or a head exiting has just
             # changed how wide this pane is, and the layout tmux has settled on
             # is the one this frame has to be drawn for. See pane_width.
-            frame = render(heads, width=pane_width(me) or None, note=note,
-                           auto=auto_enabled(), selected=picked,
+            width = pane_width(me) or None
+            auto = auto_enabled()
+            frame = render(heads, width=width, note=note,
+                           auto=auto, selected=picked,
                            loud=bool(quitting), prioritizing=prioritizing)
             if raw:
                 frame += "\n\n" + c("90", "  " + HELP)
@@ -1195,7 +1212,24 @@ def watch():
                     elif way:
                         picked = move_selection(heads, picked,
                                                 -1 if way == "up" else 1)
-                    break
+                    else:
+                        break       # some other escape - let the cycle decide
+                    # Answered here rather than by ending the frame. Every other
+                    # key does something to a head and wants the list read again
+                    # to see it; a cursor move is the one press whose entire
+                    # effect is on a list we are already holding. Going round
+                    # the outer cycle for it cost a full refresh per press - the
+                    # session files, a tail of every transcript, a tmux listing
+                    # once the cache went cold - and keys are only read down
+                    # here, so a held-down arrow queued in the terminal and paid
+                    # that once per row. That is the delay before the cursor
+                    # moves at all on a busy machine, and none of the work it
+                    # was waiting on could change where the cursor lands.
+                    #
+                    # The deadline is left alone: the refresh this cycle was
+                    # going to do still happens when it was going to happen.
+                    paint(selection_frame(heads, width, picked, auto, raw))
+                    continue
 
                 if key == "q":
                     leave, quitting, note = quit_press(quitting)
