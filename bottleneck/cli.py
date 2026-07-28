@@ -90,7 +90,7 @@ Single keys in the dashboard - no prefix:
   x kill head           c clear flags              g go to head pane   q quit
   a toggle auto-raise   R reload after editing the checkout
   G group this head     N name that group     [ ] move it up/down
-  G then r renames a group by number, [ ] ranks it, d disbands it
+  G then p ranks any group with the arrows, r renames one, d disbands
   h hold it back
 
 The number on a row belongs to the head, not the row: the queue reorders itself

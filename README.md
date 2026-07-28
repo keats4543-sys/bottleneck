@@ -22,7 +22,9 @@ as the rows reorder.
 
 Up and down walk the whole list, groups and all. Left and right jump a group at
 a time. Nothing is modal — no key changes what the other keys mean, so you never
-have to remember which way the arrows are pointing today.
+have to remember which way the arrows are pointing today. The one exception says
+so on the screen while it holds them: `G` `p`, where the arrows rank a group and
+the order redraws under them until you press Enter.
 
 **The whole row is lit for the head open beside you** — a fact about your panes,
 so you can find it without reading. **`▸` and a lit name mark the row your arrow
@@ -134,7 +136,7 @@ Single keys in the dashboard pane, no prefix:
 | `G` | put this head in a group — then a digit, `0` to clear |
 | `N` | name that group — a label instead of a number, `-` to clear |
 | `[` `]` | move its group up / down the ranking |
-| `G` `r` `d` `[` `]` | then a number: name, disband or rank any group |
+| `G` `p` `r` `d` | rank, name or disband any group — not only the one you are in |
 | `h` | hold this head — done, but below the heads still working |
 | `c` | clear all attention flags |
 | `R` | reload — hand the pane to the current code (see below) |
@@ -250,7 +252,7 @@ reprioritising never renumbers the keys you have learned.
 | `G` `r` `2` | name group 2, whether or not you are in it |
 | `G` `d` `2` | disband group 2 — its heads come back unassigned |
 | `[` `]` | move the group you are in up / down the ranking |
-| `G` `[` `2`, `G` `]` `2` | move group 2, whether or not you are in it |
+| `G` `p` | rank with the arrows — `⏎` sets it, `esc` puts it back |
 | `bottleneck group <head> <n>` | the same from a shell |
 | `bottleneck group name 2 "release work"` | give a group a label |
 | `bottleneck group up 2` | move it in the ranking (`down` too) |
@@ -283,11 +285,15 @@ its assignments as much as in its ranking, so one stale entry left behind is
 enough to bring it back on the next listing. `d` works with nothing selected,
 which is the state you are usually in when you want it.
 
-**Reordering.** `[` and `]` move a group one place up or down the ranking, and
-`G` `[` or `G` `]` asks which group first — the same reach as naming and
-disbanding, for a group you are not standing in. Heads keep their numbers
-through it: the ranking decides the order the go-on key walks, not what anything
-is called.
+**Reordering.** `[` and `]` move the group you are standing in one place up or
+down. `G` `p` is the other way round: the arrows move a group and the order
+redraws under them, a digit picks a different group to move, `⏎` sets it and
+`esc` puts it back the way it was. It is the one place here that holds the keys
+for more than a keystroke, and it earns that — a ranking is not something you
+know before you look, it is something you find by watching the order change. It
+starts on the group you are in, and reaches the ones you are not in and the
+empty ones. Heads keep their numbers through all of it: the ranking decides the
+order the go-on key walks, not what anything is called.
 
 **Grouping a head as you start it.** `bottleneck new -g 2` puts the new head in
 group 2, and `n` in the dashboard asks which group after it asks the name —

@@ -426,6 +426,32 @@ def next_key(prompt="", timeout=5.0):
     return key
 
 
+def next_press(prompt="", timeout=15.0):
+    """One keystroke, arrows and Enter included.
+
+    next_key() answers "which of these letters", so an arrow there means you
+    have changed your mind. Ranking is the other kind of question - the arrows
+    are the answer - and it is a question you are asked over and over until you
+    say you are done, which is why it waits longer than a menu does.
+    """
+    import select as _sel
+    if prompt:
+        sys.stdout.write("\n  " + c("1;93", prompt))
+        sys.stdout.flush()
+    if not sys.stdin.isatty():
+        return ""
+    if not _sel.select([sys.stdin], [], [], timeout)[0]:
+        return ""
+    key, _ = split_key(os.read(sys.stdin.fileno(), 64).decode("utf-8", "replace"))
+    if key in ("\r", "\n"):
+        return "enter"
+    if not key or key == "\x1b" or key == "\x03":
+        return ""                      # Esc, Ctrl-C, or nothing readable
+    if key.startswith("\x1b"):
+        return arrow_of(key[1:])       # "" for Alt and a key, which is not ours
+    return key
+
+
 ARROWS = {"[A": "up", "[B": "down", "[C": "right", "[D": "left",
           "OA": "up", "OB": "down", "OC": "right", "OD": "left",
           "[5~": "pgup", "[6~": "pgdn"}
@@ -559,6 +585,50 @@ def rename_group(gid, fresh=False):
     return f"{'new ' if fresh else ''}group {gid} is {label}"
 
 
+def rank_mode(gid=""):
+    """Move a group through the ranking with the arrows. Enter sets it.
+
+    The one place in this program that holds the keys for more than a
+    keystroke, and it earns it: ranking is not a fact you know before you look,
+    it is one you find by seeing the order change. Every press redraws the
+    order in the prompt with a mark on the group you are moving, so the thing
+    you are deciding about is in front of you while you decide it.
+
+    Esc puts the order back the way it was. A move you can only undo by
+    remembering what you started with is a move you will not make.
+    """
+    book = queue_load()
+    order = group_ids(book)
+    if not order:
+        return "no groups to rank"
+    started = list(order)
+    gid = gid if gid in order else order[0]
+    while True:
+        book = queue_load()
+        order = group_ids(book)
+        gid = gid if gid in order else order[0]
+        at = order.index(gid)
+        line = "  ".join(("▸" if g == gid else " ") + f"{g}:{group_label(book, g)}"
+                         for g in order)
+        press = next_press(f"↑↓ move  1-9 pick  ⏎ set  esc undo   {line}")
+        if press in ("up", "[", "left"):
+            move_group(gid, -1)
+        elif press in ("down", "]", "right"):
+            move_group(gid, 1)
+        elif press and press.isdigit() and press != "0":
+            # Pick another group without leaving - the ranking is a
+            # comparison, so the group you want to move next is usually the one
+            # you just moved something past.
+            gid = press if press in order else gid
+        elif press == "enter":
+            return (f"{group_label(book, gid)} is {ordinal(at + 1)} "
+                    f"of {len(order)}")
+        else:
+            book["order"] = started
+            queue_save(book)
+            return "ranking left as it was"
+
+
 def queue_key(key, heads, selected=""):
     """The group and hold keys. Returns the line to show; never raises.
 
@@ -583,30 +653,24 @@ def queue_key(key, heads, selected=""):
         order = group_ids(book)
         menu = "  ".join(f"{g}:{group_label(book, g)}" for g in order[:6])
         who = cur["name"] if usable else ""
-        got = next_key((f"group for {who}? [1-9, 0 clears, r renames, "
-                        "[ ] rank, d disbands]" if who else
-                        "no head selected - "
-                        "[r renames, [ ] rank a group, d disbands]")
+        got = next_key((f"group for {who}? [1-9, 0 clears, "
+                        "p ranks, r renames, d disbands]" if who else
+                        "no head selected - [p ranks, r renames, d disbands]")
                        + (f"   {menu}" if menu else ""))
         if not got:
             return "cancelled"
-        if got in ("d", "r", "[", "]"):
-            verb = {"d": "disband", "r": "rename",
-                    "[": "promote", "]": "demote"}[got]
-            if not order and got != "r":
-                return f"no groups to {verb}"
+        if got == "p":
+            # Ranking starts on the group you are standing in when there is
+            # one. The arrows take it from there, and a digit moves to another.
+            return rank_mode(cur.get("group", "") if cur else "")
+        if got in ("d", "r"):
+            verb = "disband" if got == "d" else "rename"
+            if not order and got == "d":
+                return "no groups to disband"
             pick = next_key(f"{verb} which group? [number]"
                             + (f"   {menu}" if menu else ""))
             if not pick or not pick.isdigit():
                 return "cancelled"
-            if got in ("[", "]"):
-                # Same two keys as the bare ranking pair, and the same
-                # direction: [ is towards the front of the queue.
-                at = move_group(pick, -1 if got == "[" else 1)
-                if not at:
-                    return f"no group {pick}"
-                return (f"{group_label(queue_load(), pick)} is now "
-                        f"{ordinal(at)} of {len(order)}")
             if got == "d":
                 was = group_label(book, pick)
                 freed = disband_group(pick)

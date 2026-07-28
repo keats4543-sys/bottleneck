@@ -311,33 +311,77 @@ check("but backing out of a new one leaves nothing behind",
       m.queue_key("G", [], ""), "cancelled")
 check("no group 9", "9" in m.group_ids(m.queue_load()), False)
 
-print("\nG then [ or ] ranks a group by number")
+print("\nG then p ranks with the arrows, and Enter sets it")
+SEEN = []
+
+
+def pressing(*keys):
+    """Answer the ranking prompts in order, and keep what they showed."""
+    keys = list(keys)
+    SEEN.clear()
+
+    def fake(prompt=""):
+        SEEN.append(prompt)
+        return keys.pop(0) if keys else ""
+    m.next_press = fake
+
+
 fresh()
 m.name_group("1", "meta")
 m.name_group("2", "ml4t")
 m.name_group("3", "spare")
-typing("]", "1")
-check("] pushes it back down the queue", m.queue_key("G", [], ""),
-      "meta is now 2nd of 3")
+typing("p")
+pressing("down", "down", "enter")
+check("down walks a group towards the back", m.queue_key("G", [], ""),
+      "meta is 3rd of 3")
 check("which is the order the heads will be walked in",
-      m.group_ids(m.queue_load()), ["2", "1", "3"])
-typing("[", "3")
-check("[ brings one forward", m.queue_key("G", [], ""),
-      "spare is now 2nd of 3")
-check("and the one it passed drops back",
       m.group_ids(m.queue_load()), ["2", "3", "1"])
-typing("[", "9")
-check("a group nobody has made cannot be moved",
-      m.queue_key("G", [], ""), "no group 9")
-typing("[", "2")
-check("the front does not wrap round to the back",
-      m.queue_key("G", [], ""), "ml4t is now 1st of 3")
-check("nothing moved", m.group_ids(m.queue_load()), ["2", "3", "1"])
+check("the prompt shows the order as it goes",
+      [p.split("esc undo   ")[-1] for p in SEEN],
+      ["▸1:meta   2:ml4t   3:spare",
+       " 2:ml4t  ▸1:meta   3:spare",
+       " 2:ml4t   3:spare  ▸1:meta"])
+
+typing("p")
+pressing("up", "enter")
+check("up walks it back towards the front", m.queue_key("G", [], ""),
+      "ml4t is 1st of 3")
+check("and the front does not wrap round to the back",
+      m.group_ids(m.queue_load()), ["2", "3", "1"])
+
+typing("p")
+pressing("3", "up", "enter")
+check("a digit picks another group without leaving",
+      m.queue_key("G", [], ""), "spare is 1st of 3")
+check("which moved instead", m.group_ids(m.queue_load()), ["3", "2", "1"])
+
+typing("p")
+pressing("down", "down", "\x1b")
+check("esc puts the order back the way it was",
+      m.queue_key("G", [], ""), "ranking left as it was")
+check("so nothing moved", m.group_ids(m.queue_load()), ["3", "2", "1"])
+
+typing("p")
+pressing("down", "")
+check("and so does giving up on it - a timeout is not a decision",
+      m.queue_key("G", [], ""), "ranking left as it was")
+check("still nothing moved", m.group_ids(m.queue_load()), ["3", "2", "1"])
 
 fresh()
-typing("[")
-check("with no groups it does not ask which",
-      m.queue_key("G", [], ""), "no groups to promote")
+typing("p")
+pressing("enter")
+check("with no groups there is nothing to rank",
+      m.queue_key("G", [], ""), "no groups to rank")
+
+fresh()
+m.set_group("sid-p", "1")
+m.set_group("sid-q", "2")
+m.name_group("2", "ml4t")
+rows = [head("ann", group="2")]
+typing("p")
+pressing("up", "enter")
+check("it starts on the group you are standing in",
+      m.queue_key("G", rows, "ann"), "ml4t is 1st of 2")
 
 fresh()
 m.set_group("sid-r", "1")
