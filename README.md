@@ -135,8 +135,8 @@ Single keys in the dashboard pane, no prefix:
 | `x` | kill a head — asks which, defaults to the one in the main pane |
 | `G` | put this head in a group — then a digit, `0` to clear |
 | `N` | name that group — a label instead of a number, `-` to clear |
-| `[` `]` | move its group up / down the ranking |
-| `G` `p` `r` `d` | rank, name or disband any group — not only the one you are in |
+| `[` `]` | move its group up / down the priority order |
+| `G` `p` `r` `d` | prioritise, name or disband any group — not only the one you are in |
 | `h` | hold this head — done, but below the heads still working |
 | `c` | clear all attention flags |
 | `R` | reload — hand the pane to the current code (see below) |
@@ -238,7 +238,8 @@ unaffected - Windows Terminal claims none of those.
 Two ways to say "this one matters more", both a keystroke.
 
 **Groups.** `G` then a digit puts the head you are in into group 1–9; `0` takes
-it out. `[` and `]` move that head's whole group up and down the ranking. The
+it out. `[` and `]` move that head's whole group up and down the priority
+order. The
 list sorts by group before it sorts by need, so the go-on key clears the first
 group before it offers you anything from the second — however long the second
 has been waiting. Groups are keyed by digit and ranked by a separate list, so
@@ -251,11 +252,11 @@ reprioritising never renumbers the keys you have learned.
 | `N` | name the group this head is in |
 | `G` `r` `⏎` | name the group you are standing in — a digit names another |
 | `G` `d` `⏎` | disband it — its heads come back unassigned |
-| `[` `]` | move the group you are in up / down the ranking |
+| `[` `]` | move the group you are in up / down the priority order |
 | `G` `p` | the arrows move a group through the list — `⏎` sets it, `esc` puts it back |
 | `bottleneck group <head> <n>` | the same from a shell |
 | `bottleneck group name 2 "release work"` | give a group a label |
-| `bottleneck group up 2` | move it in the ranking (`down` too) |
+| `bottleneck group up 2` | move it in the priority order (`down` too) |
 | `bottleneck group disband 2` | the same from a shell |
 | `bottleneck groups` | who is in what, in order |
 | `bottleneck new x -g 2` | start a head already in group 2 |
@@ -270,34 +271,34 @@ back. Nothing has to be named: an unnamed group reads as `group 2` and works
 exactly the same, which is why `G` mentions the key only when the group you just
 joined has no name yet. A name is also enough to make a group real on its own —
 `bottleneck group name 3 "next week"`, or `G` `r` `3`, puts group 3 in the
-ranking before anyone is in it, so you can lay the buckets out first and fill
+priority order before anyone is in it, so you can lay the buckets out and fill
 them later.
 
 **Emptying and disbanding.** A group keeps its heading when the last head in it
-exits, and says `empty`. It is a bucket you made and ranked, not a side effect of
+exits, and says `empty`. It is a bucket you made and placed, not a side effect of
 who happens to be running, and a group that vanished with its last head would
 leave you unable to tell a group you had lost from a head you had lost — and
 would come back later in an order you never chose. `G` `d` takes one apart for
-good: the heads in it come back unassigned, the label and the rank go, and so do
+good: the heads in it come back unassigned, the label and the place go, and so do
 the assignments for sessions that ended long ago and any claim still waiting on
 it. That last part is why it is a command and not three edits — a group lives in
-its assignments as much as in its ranking, so one stale entry left behind is
+its assignments as much as in the priority order, so one stale entry left is
 enough to bring it back on the next listing. `d` offers the group you are standing in on Enter, like `r`, and works with
 nothing selected at all — which is the state you are usually in when you want
 it. It asks even when it has a default: disbanding should cost one keystroke
-more than ranking does.
+more than moving one does.
 
-**Reordering.** `[` and `]` move the group you are standing in one place up or
-down. `G` `p` hands the arrows to the ranking instead: the marked group and its
-heads move through the list itself, a press at a time, and the answer to each
-press is the redrawn list rather than a line of text about it. A digit picks a
+**Priority order.** `[` and `]` move the group you are standing in one place up
+or down. `G` `p` hands the arrows to the priority order instead: the marked
+group and its heads move through the list itself, a press at a time, and each
+press is answered by the redrawn list rather than a line of text. A digit picks a
 different group to move, `⏎` sets it, `esc` puts the order back the way it was.
 It is the one place here that holds the keys for more than a keystroke, and it
-earns that — a ranking is not something you know before you look, it is
+earns that — a priority order is not something you know before you look, it is
 something you find by watching the order change. It starts on the group you are
 in, and reaches the ones you are not in and the empty ones. Heads keep their
-numbers through all of it: the ranking decides the order the go-on key walks,
-not what anything is called.
+numbers through all of it: the priority order decides which heads the go-on key
+reaches first, not what anything is called.
 
 **Grouping a head as you start it.** `bottleneck new -g 2` puts the new head in
 group 2, and `n` in the dashboard asks which group after it asks the name —
@@ -696,7 +697,7 @@ pane has ended up. If nothing ever turns up, the row stays and repeats what the
 pane last printed, which is usually `claude: command not found` and is the
 answer you opened it to find.
 
-The row is a pane, not a head: it has no session id, so `G`, `h` and the ranking
+The row is a pane, not a head: it has no session id, so `G`, `h` and the priority
 keys decline it and say why. Enter, the digit keys, `j` and `x` all work.
 
 ### Switching without the flicker

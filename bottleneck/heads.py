@@ -220,7 +220,7 @@ def collect():
             "held": bool(hold and state == "HELD"),
         })
 
-    # Group before need: the go-on key walks the list, so ranking the groups
+    # Group before need: the go-on key walks the list, so ordering the groups
     # here is what makes it clear one group before it offers you the next.
     # Anything unanswerable sinks below everything else, whatever state it is
     # in and whatever group it was put in: a BLOCKED head on the other side of

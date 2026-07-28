@@ -146,8 +146,8 @@ def clear_attention(sid):
 #
 # Two ways to say "this one matters more", both meant to be one keystroke.
 #
-# A group is a bucket of heads with a rank. Buckets are keyed by digit, so
-# assigning is G then a number, and the ranking is a separate list, so you can
+# A group is a bucket of heads with a priority. Buckets are keyed by digit, so
+# assigning is G then a number, and the order is a separate list, so you can
 # reprioritise a group without renumbering the keys people have learned. The
 # list sorts by group before it sorts by need, which is what makes the go-on key
 # finish one group before it offers you the next: the second group's waiting
@@ -208,7 +208,7 @@ def name_group(gid, label):
     """Give a group a label, or hand it back its number with a blank one.
 
     Naming is not what makes a group exist - assigning a head is - so a group
-    named before anyone is in it still has to appear in the ranking, or it
+    named before anyone is in it still has to appear in the order, or it
     would be a label on nothing that quietly sorts last.
     """
     book = queue_load()
@@ -228,7 +228,7 @@ def disband_group(gid):
     """Take a group out of the book. Its heads come back unassigned.
 
     Membership is what keeps a group alive - group_ids() reads the assignments
-    as well as the ranking - so dropping the label and the rank is not enough.
+    as well as the order - so dropping the label and the place is not enough.
     Every entry pointing at it has to go, including the ones for sessions that
     ended weeks ago, or the next listing quietly brings the group back. The
     claims go the same way: a claim is a group waiting for a head that has not
@@ -254,7 +254,7 @@ def disband_group(gid):
 
 
 def move_group(gid, delta):
-    """Shift a group up or down the ranking. Returns the new position, 1-based."""
+    """Shift a group up or down the priority order. Returns its place, 1-based."""
     book = queue_load()
     order = group_ids(book)
     if gid not in order:

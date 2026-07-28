@@ -78,7 +78,7 @@ hidden windows; picking one moves its pane in beside the dashboard.
   bottleneck group <n> <g> put head n in a priority group ("none" to clear)
   bottleneck groups        who is in what, in priority order
   bottleneck group name <n> <label>   call a group something
-  bottleneck group up|down <n>        move a group in the ranking
+  bottleneck group up|down <n>        move a group in the priority order
   bottleneck group disband <n>        take a group apart, freeing its heads
   bottleneck claim <name> <g>  group a head that has not started yet
   bottleneck hold <n>      done, but sorts below the heads still working
@@ -90,7 +90,7 @@ Single keys in the dashboard - no prefix:
   x kill head           c clear flags              g go to head pane   q quit
   a toggle auto-raise   R reload after editing the checkout
   G group this head     N name that group     [ ] move it up/down
-  G then p gives the arrows to the ranking, r renames a group, d disbands one
+  G then p gives the arrows to the priority order, r renames, d disbands
   h hold it back
 
 The number on a row belongs to the head, not the row: the queue reorders itself

@@ -351,12 +351,12 @@ check("with nothing selected there is no default to offer",
 check("and the prompt does not pretend there is",
       "⏎ for" in TYPED[1], False)
 
-print("\nG then p hands the arrows to the ranking")
+print("\nG then p hands the arrows to the priority order")
 UP, DOWN = "\x1b[A", "\x1b[B"
 
 
-def ranking(gid, *keys):
-    """Press keys at the ranking the way the loop does, and report the end.
+def moving(gid, *keys):
+    """Press keys at the priority order the way the loop does, and report back.
 
     Returns (note, group still being ranked, order now). The loop redraws
     between presses - that redraw is what you are watching - so this stands in
@@ -365,7 +365,7 @@ def ranking(gid, *keys):
     was = m.group_ids(m.queue_load())
     note = ""
     for key in keys:
-        note, gid, was = m.rank_press(key, gid, was)
+        note, gid, was = m.priority_press(key, gid, was)
         if not gid:
             break
     return note, gid, m.group_ids(m.queue_load())
@@ -377,42 +377,42 @@ m.name_group("2", "ml4t")
 m.name_group("3", "spare")
 typing("p")
 check("G p does not act, it hands the keys over",
-      m.queue_key("G", [], ""), m.RANK + "1")
+      m.queue_key("G", [], ""), m.PRIORITY + "1")
 check("and nothing has moved yet", m.group_ids(m.queue_load()),
       ["1", "2", "3"])
 
 check("down walks a group towards the back",
-      ranking("1", DOWN, DOWN, "\r"), ("meta is 3rd of 3", "", ["2", "3", "1"]))
+      moving("1", DOWN, DOWN, "\r"), ("meta is 3rd of 3", "", ["2", "3", "1"]))
 check("one press, one move - the list is the answer",
-      ranking("1", UP)[2], ["2", "1", "3"])
-check("and it is still yours to move", ranking("1", UP)[1], "1")
+      moving("1", UP)[2], ["2", "1", "3"])
+check("and it is still yours to move", moving("1", UP)[1], "1")
 check("the front does not wrap round to the back",
-      ranking("2", UP, UP, UP)[2], ["2", "1", "3"])
+      moving("2", UP, UP, UP)[2], ["2", "1", "3"])
 check("nor the back to the front",
-      ranking("3", DOWN, DOWN)[2], ["2", "1", "3"])
+      moving("3", DOWN, DOWN)[2], ["2", "1", "3"])
 
 check("a digit picks another group without leaving",
-      ranking("1", "3", UP)[2], ["2", "3", "1"])
+      moving("1", "3", UP)[2], ["2", "3", "1"])
 check("and that group is the one being moved now",
-      ranking("1", "3")[1], "3")
+      moving("1", "3")[1], "3")
 check("a digit nobody uses is ignored rather than obeyed",
-      ranking("1", "9")[1], "1")
+      moving("1", "9")[1], "1")
 
 check("esc puts the order back the way it was",
-      ranking("3", UP, UP, "\x1b"),
-      ("ranking left as it was", "", ["2", "3", "1"]))
+      moving("3", UP, UP, "\x1b"),
+      ("priority left as it was", "", ["2", "3", "1"]))
 check("and so does any key that is not part of it",
-      ranking("3", UP, "z"), ("ranking left as it was", "", ["2", "3", "1"]))
+      moving("3", UP, "z"), ("priority left as it was", "", ["2", "3", "1"]))
 check("[ and ] move it too, for the fingers that reach for them",
-      ranking("1", "[", "\r"), ("meta is 2nd of 3", "", ["2", "1", "3"]))
+      moving("1", "[", "\r"), ("meta is 2nd of 3", "", ["2", "1", "3"]))
 
 check("a group disbanded under the ranking ends it quietly",
-      m.rank_press(UP, "8", ["2", "1", "3"]), ("", "", None))
+      m.priority_press(UP, "8", ["2", "1", "3"]), ("", "", None))
 
 fresh()
 typing("p")
 check("with no groups there is nothing to rank",
-      m.queue_key("G", [], ""), "no groups to rank")
+      m.queue_key("G", [], ""), "no groups to prioritise")
 
 fresh()
 m.set_group("sid-p", "1")
@@ -421,11 +421,11 @@ m.name_group("2", "ml4t")
 rows = [head("ann", group="2")]
 typing("p")
 check("it starts on the group you are standing in",
-      m.queue_key("G", rows, "ann"), m.RANK + "2")
+      m.queue_key("G", rows, "ann"), m.PRIORITY + "2")
 check("and on the first one when you are in none",
-      m.rank_start("", ["2", "1"]), m.RANK + "2")
+      m.priority_start("", ["2", "1"]), m.PRIORITY + "2")
 check("the note says what the keys are doing while they do it",
-      "↑↓ move it" in m.rank_note("2") and "ml4t" in m.rank_note("2"), True)
+      "↑↓ move" in m.priority_note("2") and "ml4t" in m.priority_note("2"), True)
 
 fresh()
 m.set_group("sid-r", "1")

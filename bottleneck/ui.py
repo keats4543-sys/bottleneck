@@ -137,7 +137,7 @@ def spinner(now=None):
 
 
 def render(heads, width=None, note="", auto=None, selected="", loud=False,
-           groups=None, ranking=""):
+           groups=None, prioritising=""):
     if width is None:
         try:
             width = os.get_terminal_size().columns
@@ -176,9 +176,9 @@ def render(heads, width=None, note="", auto=None, selected="", loud=False,
     # A group with nobody in it still gets its heading. It is a slot you made
     # and named, and the whole point of it is that heads go there - if it
     # vanished the moment the last one exited you would be left wondering
-    # whether you had lost the group or only the head, and the ranking you set
-    # would come back in an order you never chose. An empty one says so, and
-    # stays where you put it, until you disband it.
+    # whether you had lost the group or only the head, and the order you set
+    # would come back as one you never chose. An empty one says so,
+    # and stays where you put it, until you disband it.
     if groups is None:
         book = queue_load()
         groups = [(g, group_label(book, g)) for g in group_ids(book)]
@@ -193,9 +193,9 @@ def render(heads, width=None, note="", auto=None, selected="", loud=False,
         title = (f"{label}  [{gid}]" if gid else "unassigned")
         if hollow:
             title += "  empty"
-        # The group being ranked is marked and lit wherever it lands, because
+        # The group being moved is marked and lit wherever it lands, because
         # the whole of what you are watching is where it lands.
-        moving = bool(gid) and gid == ranking
+        moving = bool(gid) and gid == prioritising
         lead = "▸" if moving else " "
         rule = "─" * max(0, width - len(title) - 4)
         colour = ("1;93" if moving else
@@ -367,7 +367,7 @@ def render_sessions(rows, width=None):
     return "\n".join(lines)
 
 
-HELP = ("↑↓ select  ←→ group  ⏎ open  1-9 focus  j next/park  G group  N name  [ ] rank  h hold  "
+HELP = ("↑↓ select  ←→ group  ⏎ open  1-9 focus  j next/park  G group  N name  [ ] priority  h hold  "
         "a auto  n new  r resume  x kill  c clear  g go  R reload  qq quit  "
         "esc back")
 
@@ -571,24 +571,24 @@ def rename_group(gid, fresh=False):
     return f"{'new ' if fresh else ''}group {gid} is {label}"
 
 
-# Ranking is the one thing here that cannot be answered in a keystroke, because
-# the answer is not a fact you know before you look - it is one you find by
-# watching the order change. So it is not a prompt: it is a state the list is
-# in. The keys go to the ranking while it lasts, every press moves a group and
-# the dashboard redraws with that group somewhere else, and the thing you are
+# Priority is the one thing here that cannot be answered in a keystroke,
+# because the answer is not a fact you know before you look - it is one you
+# find by watching the order change. So it is not a prompt: it is a state the
+# list is in. The keys go to it while it lasts, every press moves a group, the
+# dashboard redraws with that group somewhere else, and the thing you are
 # deciding about is the list itself rather than a line of text about the list.
-RANK = "\0rank\0"          # queue_key's way of saying "hand me the arrows"
+PRIORITY = "\0priority\0"     # queue_key's way of saying "hand me the arrows"
 
 
 def pick_group(verb, here, book, menu):
     """Which group to act on: the one you are standing in, or another.
 
-    Ranking knows where the cursor is, and the rest of the group keys had no
+    Priority knows where the cursor is, and the rest of the group keys had no
     excuse not to. So the group of the selected head is the answer already on
     the prompt, Enter takes it, and a digit says a different one. Empty means
     you changed your mind - which is why Enter has to come back distinct from
     Esc here, and why this asks even when it has a default: disbanding is two
-    keystrokes from a lot of ranking, and it should cost one more.
+    keystrokes from a lot of priority work, and it should cost one more.
     """
     hint = f", ⏎ for {group_label(book, here)}" if here else ""
     got = next_key(f"{verb} which group? [number{hint}]"
@@ -598,17 +598,17 @@ def pick_group(verb, here, book, menu):
     return got if got.isdigit() else ""
 
 
-def rank_start(gid, order):
-    """Enter ranking on gid, or on the first group when it is in none."""
+def priority_start(gid, order):
+    """Start on gid, or on the first group when the head is in none."""
     if not order:
-        return "no groups to rank"
-    return RANK + (gid if gid in order else order[0])
+        return "no groups to prioritise"
+    return PRIORITY + (gid if gid in order else order[0])
 
 
-def rank_press(key, gid, was):
-    """One key while the list is being ranked.
+def priority_press(key, gid, was):
+    """One key while a group is being prioritised.
 
-    Returns the note to show, the group still being ranked - empty once it is
+    Returns the note to show, the group still being moved - empty once it is
     over - and the order to put back if it is not over yet. Esc restores the
     order it started with: a move you can only undo by remembering what you
     began with is a move you will not make.
@@ -625,21 +625,21 @@ def rank_press(key, gid, was):
         move_group(gid, 1)
         return "", gid, was
     if key.isdigit() and key != "0":
-        # Pick another group without leaving - ranking is a comparison, so the
-        # next group you want to move is usually the one you just moved past.
+        # Pick another group without leaving - priority is a comparison, so
+        # the next group you want is usually the one you just moved past.
         return "", (key if key in order else gid), was
     if key in ("\r", "\n"):
         return (f"{group_label(book, gid)} is {ordinal(order.index(gid) + 1)} "
                 f"of {len(order)}"), "", None
     book["order"] = was
     queue_save(book)
-    return "ranking left as it was", "", None
+    return "priority left as it was", "", None
 
 
-def rank_note(gid):
+def priority_note(gid):
     """What the keys do, said while they are doing it."""
-    return (f"ranking {group_label(queue_load(), gid)} - "
-            "↑↓ move it  1-9 pick another  ⏎ set  esc put it back")
+    return (f"prioritising {group_label(queue_load(), gid)} - "
+            "↑↓ move  1-9 pick  ⏎ set  esc undo")
 
 
 def queue_key(key, heads, selected=""):
@@ -658,24 +658,25 @@ def queue_key(key, heads, selected=""):
     usable = cur is not None and not cur.get("pending")
 
     if key == "G":
-        # Naming, ranking and disbanding are the things on this key that are
-        # about a group rather than about a head, so they are the things here
-        # that work with nothing selected - an empty group is exactly the one
-        # you want to name, move or be rid of, and it has no head to point at.
+        # Naming, prioritising and disbanding are the things on this key that
+        # are about a group rather than about a head, so they are the things
+        # here that work with nothing selected - an empty group is exactly the
+        # one you want to name, move or be rid of, with no head to point at.
         book = queue_load()
         order = group_ids(book)
         menu = "  ".join(f"{g}:{group_label(book, g)}" for g in order[:6])
         who = cur["name"] if usable else ""
         got = next_key((f"group for {who}? [1-9, 0 clears, "
-                        "p ranks, r renames, d disbands]" if who else
-                        "no head selected - [p ranks, r renames, d disbands]")
+                        "p priority, r renames, d disbands]" if who else
+                        "no head selected - "
+                        "[p priority, r renames, d disbands]")
                        + (f"   {menu}" if menu else ""))
         if not got:
             return "cancelled"
         if got == "p":
-            # Ranking starts on the group you are standing in when there is
+            # Priority starts on the group you are standing in when there is
             # one. The arrows take it from there, and a digit moves to another.
-            return rank_start(cur.get("group", "") if cur else "", order)
+            return priority_start(cur.get("group", "") if cur else "", order)
         if got in ("d", "r"):
             verb = "disband" if got == "d" else "rename"
             if not order and got == "d":
@@ -733,7 +734,7 @@ def queue_key(key, heads, selected=""):
             return f"{name} is not in a group - press G first"
         return rename_group(gid)
 
-    # [ and ] - move this head's whole group up or down the ranking.
+    # [ and ] - move this head's whole group up or down the priority order.
     if not cur["group"]:
         return f"{name} is not in a group - press G first"
     at = move_group(cur["group"], -1 if key == "[" else 1)
@@ -1033,8 +1034,8 @@ def watch():
     picked = ""        # session id the arrow keys are on
     typed = ""         # bytes the terminal sent that we have not read yet
     quitting = 0.0     # when q was pressed, while the answer is still open
-    ranking = ""       # group the arrows are moving, while they are moving it
-    rank_undo = None   # the order it had before, for esc
+    prioritising = ""  # group the arrows are moving, while they are moving it
+    priority_undo = None   # the order it had before, for esc
     try:
         # The alternate screen, because this is a screen and not a transcript.
         #
@@ -1105,18 +1106,18 @@ def watch():
             # line is cleared after each redraw, and a mode whose instructions
             # scrolled away a second in would be a mode you were left guessing
             # at with the keys already taken.
-            if ranking:
-                if ranking in group_ids(queue_load()):
-                    note = rank_note(ranking)
+            if prioritising:
+                if prioritising in group_ids(queue_load()):
+                    note = priority_note(prioritising)
                 else:
-                    ranking, rank_undo = "", None
+                    prioritising, priority_undo = "", None
             # Asked of tmux rather than of the terminal, and asked here rather
             # than at the top of the cycle: a raise or a head exiting has just
             # changed how wide this pane is, and the layout tmux has settled on
             # is the one this frame has to be drawn for. See pane_width.
             frame = render(heads, width=pane_width(me) or None, note=note,
                            auto=auto_enabled(), selected=picked,
-                           loud=bool(quitting), ranking=ranking)
+                           loud=bool(quitting), prioritising=prioritising)
             if raw:
                 frame += "\n\n" + c("90", "  " + HELP)
             # Anything that arrived while the frame was being built is about
@@ -1178,12 +1179,12 @@ def watch():
                 if quitting and key != "q":
                     quitting = 0.0
 
-                # While a group is being ranked the keys are the ranking's, and
+                # While a group is being prioritised the keys are its own, and
                 # every one of them ends the frame - that redraw, with the
                 # group somewhere else in the list, is the answer to the press.
-                if ranking:
-                    note, ranking, rank_undo = rank_press(key, ranking,
-                                                          rank_undo)
+                if prioritising:
+                    note, prioritising, priority_undo = priority_press(
+                        key, prioritising, priority_undo)
                     break
 
                 if key.startswith("\x1b") and len(key) > 1:
@@ -1241,13 +1242,13 @@ def watch():
                 if key in ("G", "N", "h", "[", "]"):
                     note = queue_key(key, heads, picked)
                     held = None
-                    if note.startswith(RANK):
-                        ranking, note = note[len(RANK):], ""
+                    if note.startswith(PRIORITY):
+                        prioritising, note = note[len(PRIORITY):], ""
                         # The order as it stands, not as the file spells it: a
                         # group can be in use without being listed, and putting
-                        # back a line that never mentioned it would rank it
-                        # somewhere you never put it.
-                        rank_undo = group_ids(queue_load())
+                        # back a line that never mentioned it would put it
+                        # somewhere you never chose.
+                        priority_undo = group_ids(queue_load())
                     break
                 if key == "a":
                     on = set_auto(not auto_enabled())
