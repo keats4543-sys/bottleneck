@@ -575,28 +575,38 @@ def queue_key(key, heads, selected=""):
     usable = cur is not None and not cur.get("pending")
 
     if key == "G":
-        # Renaming and disbanding are the two things on this key that are about
-        # a group rather than about a head, so they are the two things here
+        # Naming, ranking and disbanding are the things on this key that are
+        # about a group rather than about a head, so they are the things here
         # that work with nothing selected - an empty group is exactly the one
-        # you want to name or be rid of, and it has no head to point at.
+        # you want to name, move or be rid of, and it has no head to point at.
         book = queue_load()
         order = group_ids(book)
         menu = "  ".join(f"{g}:{group_label(book, g)}" for g in order[:6])
         who = cur["name"] if usable else ""
         got = next_key((f"group for {who}? [1-9, 0 clears, r renames, "
-                        "d disbands]" if who else
-                        "no head selected - [r renames, d disbands a group]")
+                        "[ ] rank, d disbands]" if who else
+                        "no head selected - "
+                        "[r renames, [ ] rank a group, d disbands]")
                        + (f"   {menu}" if menu else ""))
         if not got:
             return "cancelled"
-        if got in ("d", "r"):
-            verb = "disband" if got == "d" else "rename"
-            if not order and got == "d":
-                return "no groups to disband"
+        if got in ("d", "r", "[", "]"):
+            verb = {"d": "disband", "r": "rename",
+                    "[": "promote", "]": "demote"}[got]
+            if not order and got != "r":
+                return f"no groups to {verb}"
             pick = next_key(f"{verb} which group? [number]"
                             + (f"   {menu}" if menu else ""))
             if not pick or not pick.isdigit():
                 return "cancelled"
+            if got in ("[", "]"):
+                # Same two keys as the bare ranking pair, and the same
+                # direction: [ is towards the front of the queue.
+                at = move_group(pick, -1 if got == "[" else 1)
+                if not at:
+                    return f"no group {pick}"
+                return (f"{group_label(queue_load(), pick)} is now "
+                        f"{ordinal(at)} of {len(order)}")
             if got == "d":
                 was = group_label(book, pick)
                 freed = disband_group(pick)

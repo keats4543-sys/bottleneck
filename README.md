@@ -134,6 +134,7 @@ Single keys in the dashboard pane, no prefix:
 | `G` | put this head in a group — then a digit, `0` to clear |
 | `N` | name that group — a label instead of a number, `-` to clear |
 | `[` `]` | move its group up / down the ranking |
+| `G` `r` `d` `[` `]` | then a number: name, disband or rank any group |
 | `h` | hold this head — done, but below the heads still working |
 | `c` | clear all attention flags |
 | `R` | reload — hand the pane to the current code (see below) |
@@ -248,9 +249,11 @@ reprioritising never renumbers the keys you have learned.
 | `N` | name the group this head is in |
 | `G` `r` `2` | name group 2, whether or not you are in it |
 | `G` `d` `2` | disband group 2 — its heads come back unassigned |
-| `[` `]` | move its group up / down the ranking |
+| `[` `]` | move the group you are in up / down the ranking |
+| `G` `[` `2`, `G` `]` `2` | move group 2, whether or not you are in it |
 | `bottleneck group <head> <n>` | the same from a shell |
 | `bottleneck group name 2 "release work"` | give a group a label |
+| `bottleneck group up 2` | move it in the ranking (`down` too) |
 | `bottleneck group disband 2` | the same from a shell |
 | `bottleneck groups` | who is in what, in order |
 | `bottleneck new x -g 2` | start a head already in group 2 |
@@ -279,6 +282,12 @@ it. That last part is why it is a command and not three edits — a group lives 
 its assignments as much as in its ranking, so one stale entry left behind is
 enough to bring it back on the next listing. `d` works with nothing selected,
 which is the state you are usually in when you want it.
+
+**Reordering.** `[` and `]` move a group one place up or down the ranking, and
+`G` `[` or `G` `]` asks which group first — the same reach as naming and
+disbanding, for a group you are not standing in. Heads keep their numbers
+through it: the ranking decides the order the go-on key walks, not what anything
+is called.
 
 **Grouping a head as you start it.** `bottleneck new -g 2` puts the new head in
 group 2, and `n` in the dashboard asks which group after it asks the name —

@@ -311,6 +311,41 @@ check("but backing out of a new one leaves nothing behind",
       m.queue_key("G", [], ""), "cancelled")
 check("no group 9", "9" in m.group_ids(m.queue_load()), False)
 
+print("\nG then [ or ] ranks a group by number")
+fresh()
+m.name_group("1", "meta")
+m.name_group("2", "ml4t")
+m.name_group("3", "spare")
+typing("]", "1")
+check("] pushes it back down the queue", m.queue_key("G", [], ""),
+      "meta is now 2nd of 3")
+check("which is the order the heads will be walked in",
+      m.group_ids(m.queue_load()), ["2", "1", "3"])
+typing("[", "3")
+check("[ brings one forward", m.queue_key("G", [], ""),
+      "spare is now 2nd of 3")
+check("and the one it passed drops back",
+      m.group_ids(m.queue_load()), ["2", "3", "1"])
+typing("[", "9")
+check("a group nobody has made cannot be moved",
+      m.queue_key("G", [], ""), "no group 9")
+typing("[", "2")
+check("the front does not wrap round to the back",
+      m.queue_key("G", [], ""), "ml4t is now 1st of 3")
+check("nothing moved", m.group_ids(m.queue_load()), ["2", "3", "1"])
+
+fresh()
+typing("[")
+check("with no groups it does not ask which",
+      m.queue_key("G", [], ""), "no groups to promote")
+
+fresh()
+m.set_group("sid-r", "1")
+m.set_group("sid-r2", "2")
+rows = [head("ann", group="2")]
+check("the bare bracket still moves the group you are standing in",
+      m.queue_key("[", rows, "ann"), "group 2 is now 1st of 2")
+
 fresh()
 m.set_group("sid-n", "1")
 rows = [head("ann", group="1")]
