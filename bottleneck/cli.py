@@ -6,6 +6,7 @@ import sys
 import time
 
 from . import config
+from . import modules
 from .config import (DANGEROUS, DEFAULT_DIR, NEEDS_ATTENTION, ROLE,
                      SESSION, STATES, VERSION, c)
 from .catalog import (catalog_backfill, catalog_load, catalog_save, live_ids,
@@ -82,6 +83,7 @@ hidden windows; picking one moves its pane in beside the dashboard.
   bottleneck group disband <n>        take a group apart, freeing its heads
   bottleneck claim <name> <g>  group a head that has not started yet
   bottleneck hold <n>      done, but sorts below the heads still working
+  bottleneck modules       what is plugged in, and what each one adds
 
 Single keys in the dashboard - no prefix:
   up/down select a row  left/right jump a group      Enter opens it
@@ -117,6 +119,23 @@ empty and your cursor on this list, the raise brings the cursor with it: there
 is nothing to displace, so the head arrives ready to answer.
 """
 
+def help_text():
+    """The commands, with whatever the modules add to them.
+
+    A module's help has to come from the module or it is one more shared file
+    to merge. It goes after the core's, under its own heading, so that reading
+    this tells you what is plugged in as well as what it does.
+
+    (The help used to print this file's one-line docstring instead of the text
+    below it, which nobody had noticed because the text below it was never
+    reached. It is reached now.)
+    """
+    said = [USAGE.rstrip()]
+    for block in modules.usage():
+        said.append("\n" + block)
+    return "\n".join(said) + "\n"
+
+
 def main(argv):
     os.makedirs(ATTN, exist_ok=True)
     os.makedirs(ACKS, exist_ok=True)
@@ -124,7 +143,7 @@ def main(argv):
     rest = argv[1:]
 
     if cmd in ("-h", "--help", "help"):
-        print(__doc__)
+        print(help_text())
         return 0
     if cmd in ("-V", "--version", "version"):
         print(f"bottleneck {VERSION}")
@@ -599,7 +618,38 @@ def main(argv):
         rc = watch()
         return restart_here() if rc == RESTART else rc
 
-    print(f"unknown command: {cmd}\n{__doc__}", file=sys.stderr)
+    if cmd == "modules":
+        # What is plugged in, whether it loaded, and what it adds. Also the
+        # answer to "is this the module or is this bottleneck": if a command
+        # is not listed here and not above, nothing is providing it.
+        if "--wiring" in rest:
+            # For install.sh, which must not know what a module is for - only
+            # which claude hooks it wants and where its hook file is.
+            print(json.dumps(modules.wiring()))
+            return 0
+        if "--state" in rest:
+            print("\n".join(modules.state_dirs()))
+            return 0
+        rows = modules.listing()
+        if not rows:
+            print("no modules in this checkout")
+            return 0
+        for row in rows:
+            mark = "on " if row["on"] else "off"
+            print(f"  {mark} {row['name']:<12} {row['summary'] or row['why']}")
+            if row["on"] and row["why"]:
+                print(f"      {row['why']}")
+        print(f"\n  BOTTLENECK_MODULES=<names> in {config.CONFIG} picks a "
+              f"subset; `none` runs the core alone")
+        return 0
+
+    # Whatever the modules add, after everything the core knows: a module can
+    # extend the commands and can never take one over.
+    fn = modules.commands().get(cmd)
+    if fn:
+        return fn(cmd, rest)
+
+    print(f"unknown command: {cmd}\n{help_text()}", file=sys.stderr)
     return 2
 
 def run(argv=None):

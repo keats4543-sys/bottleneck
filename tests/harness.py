@@ -27,6 +27,11 @@ os.environ["BOTTLENECK_STATE"] = tempfile.mkdtemp(prefix="bottleneck-tests-")
 from bottleneck import (catalog, cli, config, heads, panes, procs, store,  # noqa: E402
                         tmuxio, transcript, ui)
 
+# The core only. A module's own names are not in here on purpose: a test that
+# reaches for `m.BOARD` should not silently find one because some module in the
+# checkout happens to define it, and a module's tests import their module
+# directly - which is also the only way two modules can define the same name
+# without one of them quietly winning.
 MODULES = (config, store, procs, tmuxio, transcript, catalog, heads, panes,
            ui, cli)
 

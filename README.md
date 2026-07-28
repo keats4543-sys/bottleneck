@@ -101,14 +101,15 @@ bottleneck start
 ```
 
 The installer symlinks `bottleneck`, `bottleneck-new` and `bn` into
-`~/.local/bin`, and touches four things outside the checkout:
+`~/.local/bin`, and touches five things outside the checkout:
 
 | Path | Change |
 |---|---|
 | `~/.local/bin/*` | three symlinks |
 | `~/.claude/hooks/bottleneck-attention.py` | symlink to `hooks/attention.py` |
+| `~/.claude/hooks/bottleneck-<module>.py` | one per [module](#modules) that wants a hook |
 | `~/.tmux.conf` | one marker-guarded `source-file` line |
-| `~/.claude/settings.json` | 4 hooks — global, so they fire in every project |
+| `~/.claude/settings.json` | the core's 4 hooks, plus whatever the modules ask for |
 
 Both edits are marker-guarded and reversible: `install.sh --unmount` puts them
 back and leaves your checkout and state alone. `--purge` also deletes
@@ -325,6 +326,51 @@ A hold is against one finished state, not against the head. The moment that head
 does anything new — a fresh turn, another tool call — the hold has nothing left
 to hold and lets go by itself. `h` again, or `bottleneck unhold <n>`, releases it
 early.
+
+## Modules
+
+A module is a whole feature in one directory under `bottleneck/modules/`, and
+the core knows only that modules exist. Each extension point below is one
+generic line in the core that asks every module the same question.
+
+That is worth the indirection for one reason: **a branch carrying a feature
+edits no file that another branch also edits.** Two features are two
+directories, and they merge as two directories rather than as six files touched
+in the same six places.
+
+| A module can | key | which the core asks |
+|---|---|---|
+| add a command | `commands` | after every command of its own, so it can add one and never take one |
+| add to `--help` | `usage` | at the bottom of the help |
+| ask for a state directory | `state` | at install |
+| put a badge on a head's row | `mark` | while drawing that row |
+| put lines under a head | `lines` | under everything the core says about it |
+| put a line under a group heading | `group` | with that group's heads |
+| add to the tmux status line | `status` | after the attention counter |
+| be told the fleet was looked at | `pass` | every refresh, before anything is drawn |
+| be told what changed | `notice` | heads appearing, going, changing state or group; groups renamed |
+| bind a key | `keys`, `key_help` | after every key the core has, with the row you are pointing at |
+| take a word on the control fifo | `ctl` | after the core's own verbs — the way in from outside |
+| have a claude hook installed | `hook`, `events` | by `install.sh`, wired to the events the module names |
+
+Text a module hands back is cut to size and stripped of escapes before it is
+drawn: a feature adds to the list, and cannot take the columns the list is made
+of or turn a status segment into a tmux directive.
+
+```
+bottleneck modules              what is plugged in, and what each adds
+BOTTLENECK_MODULES=a,b          load only these
+BOTTLENECK_MODULES=none         the core alone, for when something is odd
+```
+
+A module that will not import, or that throws at any of those points, is
+disabled and named — never a dashboard that will not start, and never one that
+dies on a timer or halfway through drawing a frame. Modules may import the core;
+the core never imports a module, only the registry.
+
+No modules ship with the core. A branch that carries one carries a directory
+under `bottleneck/modules/`, and mounting that checkout installs whatever it
+asks for; mounting a checkout without it takes the wiring back out again.
 
 ## The numbers
 
@@ -766,6 +812,7 @@ wins, so a one-off override still works.
 | `BOTTLENECK_TMUX_SESSION` | `bottleneck` | tmux session name |
 | `BOTTLENECK_AUTORAISE` | `1` | initial auto-raise state |
 | `BOTTLENECK_STATE` | `~/.bottleneck` | where state lives |
+| `BOTTLENECK_MODULES` | everything present | which [modules](#modules) to load; `none` for the core alone |
 | `BOTTLENECK_NO_ATTACH` | unset | `1` stops `new` from switching you to the session |
 | `NO_COLOR` | unset | plain output |
 
@@ -792,8 +839,14 @@ running a fleet you cannot babysit, and a bad idea otherwise.
 | `panes.py` | moving heads in and out of the pane beside the list |
 | `ui.py` | the list on the screen and the keys that drive it |
 | `cli.py` | every command, and the dispatch that picks one |
+| `modules/` | features that plug in — the core knows the registry, not them |
 
-Nothing above imports anything below it. That is the only rule.
+Nothing above imports anything below it. That is the only rule. `modules/` sits
+outside the ladder: a module may import any of the core, and no part of the core
+imports a module — only `modules/__init__.py`, which knows them by name.
+
+Each module's own knobs are documented with the module, not here - a
+`bottleneck/modules/<name>/README.md` beside the code it describes.
 
 ## Tests
 

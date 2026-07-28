@@ -22,6 +22,9 @@ from .tmuxio import (dash_pane, dash_point, dash_register, dash_release,
                      invalidate, pane_in_mode, pane_width, tmux, tmux_say,
                      write_keys_conf)
 from .transcript import clip
+# Outside the ladder: whatever features this branch is carrying. This file
+# asks them all the same questions and knows none of them by name.
+from . import modules
 
 
 def mark_plain(h):
@@ -231,6 +234,15 @@ def render(heads, width=None, note="", auto=None, selected="", loud=False,
             on_group = pick is not None and pick.get("group", "") == seen_group
             lines.append(group_heading(seen_group, h.get("group_label", ""),
                                        on_group))
+            # Whatever the modules have to say about this group, under its
+            # heading, where a thing about the group belongs. A group is the
+            # unit heads are actually managed in, so it is the unit a feature
+            # most often has something to say about.
+            for out in modules.group_lines(seen_group, h.get("group_label", ""),
+                                           [g for g in heads
+                                            if g.get("group", "") == seen_group],
+                                           width):
+                lines.append(c("90", "   " + out[:width - 4]))
         i = h.get("slot") or 0
         _, label, colour = STATES[h["state"]]
         mark = c("1;93", "›") if h["attention"] else (c("1;96", "●") if h["in_main"] else " ")
@@ -250,16 +262,22 @@ def render(heads, width=None, note="", auto=None, selected="", loud=False,
             name = name[:17] + " ·bg"
         on_row = h is pick
         cursor = "▸" if on_row else " "
+        # A module's badge goes after the columns, never into them: the shape
+        # of a row is the core's, and a feature that could widen the name
+        # column would be a feature that moves every other row about.
+        badge = modules.mark(h)
+        tail = f"  {badge}" if badge else ""
 
         if narrow:
-            plain = f"{cursor}{i:>2} {label:<8} {name[:width-15]}"
+            plain = f"{cursor}{i:>2} {label:<8} {name[:width-15]}{tail}"
             painted = (f"{cursor}{i:>2} {c(colour, label.ljust(8))} "
-                       f"{sel(name[:width-15], on_row)}")
+                       f"{sel(name[:width-15], on_row)}{c('96', tail)}")
         else:
             age = fmt_age(h["idle_for"])
-            plain = f"{cursor}{i:>2} {label:<8} {name[:22]:<22} {age:>5}"
+            plain = f"{cursor}{i:>2} {label:<8} {name[:22]:<22} {age:>5}{tail}"
             painted = (f"{cursor}{i:>2} {c(colour, label.ljust(8))} "
-                       f"{sel(f'{name[:22]:<22}', on_row)} {age:>5}")
+                       f"{sel(f'{name[:22]:<22}', on_row)} {age:>5}"
+                       f"{c('96', tail)}")
         # The head open beside you gets the whole row, so you can find it
         # without reading. A bar cannot hold the state colours - every reset
         # inside it would end the background - so that row goes plain.
@@ -279,6 +297,11 @@ def render(heads, width=None, note="", auto=None, selected="", loud=False,
         # something whole.
         for out in wrap_body(body, width):
             lines.append(c("37" if h["attention"] else "90", out))
+        # Last, under everything the core has to say about this head: a module
+        # is adding to the row, not competing with the summary you are reading
+        # the list for.
+        for out in modules.lines(h, width):
+            lines.append(c("90", " " * SUB_INDENT + out[:width - SUB_INDENT - 1]))
 
     if grouped:
         flush_empty("")
@@ -370,6 +393,16 @@ def render_sessions(rows, width=None):
 HELP = ("↑↓ select  ←→ group  ⏎ open  1-9 focus  j next/park  G group  N name  [ ] priority  h hold  "
         "a auto  n new  r resume  x kill  c clear  g go  R reload  qq quit  "
         "esc back")
+
+
+def help_line():
+    """The keys, and whatever keys the modules have added to them.
+
+    A key you cannot find out about is a key you do not have, so a module that
+    binds one says so on the same line as everything else.
+    """
+    extra = modules.key_help()
+    return HELP + ("   " + "  ".join(extra) if extra else "")
 
 
 # Quitting takes two presses of q.
@@ -532,7 +565,7 @@ def selection_frame(heads, width, picked, auto, raw):
     """
     frame = render(heads, width=width, note="", auto=auto, selected=picked)
     if raw:
-        frame += "\n\n" + c("90", "  " + HELP)
+        frame += "\n\n" + c("90", "  " + help_line())
     return frame
 
 
@@ -939,6 +972,13 @@ def do_ctl(verb, arg, heads):
         return send_go(heads, arg)
     if verb in ("next", "j"):
         return next_or_park(heads)
+    # Then whatever the modules answer to. After the core's own, so a module
+    # can add a verb and never take one - and this is the way into a running
+    # dashboard from outside it, which is the way a module is reached from a
+    # tmux binding, a script, or a head talking about itself.
+    said = modules.ctl(verb, arg, heads)
+    if said is not None:
+        return said
     return f"unknown control verb: {verb}", True
 
 
@@ -956,11 +996,16 @@ def bar_text(heads):
     for anyone who has wired the status line up the old way.
     """
     want = [h for h in heads if h["attention"] and not h.get("elsewhere")]
+    # A module gets its own segment after the counter, and gets one whether or
+    # not anything is waiting: a feature with something to say about the fleet
+    # is not only worth saying when the fleet wants you.
+    extra = "".join(f"#[fg=colour250,bg=default] {bit} #[default]"
+                    for bit in modules.status(heads))
     if not want:
-        return ""
+        return extra
     worst = want[0]["state"]
     return (f"#[fg=colour232,bg={BAR_COLOURS.get(worst, 'colour250')},bold] "
-            f"{len(want)} {worst.lower()} #[default]")
+            f"{len(want)} {worst.lower()} #[default]" + extra)
 
 
 _bar_said = None
@@ -1078,6 +1123,13 @@ def watch():
             dash_point(me)
             heads = collect()
             catalog_note(heads)
+            # Every module gets told the fleet has just been looked at, here,
+            # where the list is fresh and nothing has been drawn yet. One of
+            # them reads what the heads have written since the last pass; the
+            # next one will do something else. Neither is this file's business,
+            # and a module that raises in here is disabled rather than allowed
+            # to take the dashboard down on a timer.
+            modules.on_pass(heads)
             # The panes we have opened that are not heads yet, on the list
             # ahead of everything else - they are the newest thing there is,
             # and one of them may be sat asking you whether it may read the
@@ -1136,7 +1188,7 @@ def watch():
                            auto=auto, selected=picked,
                            loud=bool(quitting), prioritizing=prioritizing)
             if raw:
-                frame += "\n\n" + c("90", "  " + HELP)
+                frame += "\n\n" + c("90", "  " + help_line())
             # Anything that arrived while the frame was being built is about
             # the frame before it. Cleared here so the wait below only sees a
             # resize that happened to what is now on screen.
@@ -1418,7 +1470,18 @@ def watch():
                     # the terminal is back to normal before we hand over.
                     return RESTART
                 if key == "?":
-                    note = HELP
+                    note = help_line()
+                    break
+                # Last, after every key the core has: a module can add a key
+                # and can never take one. It is given the row you are pointing
+                # at, because that is what pressing a key on this list means.
+                said = modules.press(
+                    key,
+                    next((h for h in heads if h["session_id"] == picked), None),
+                    heads)
+                if said is not None:
+                    note = said
+                    held = None
                     break
     except KeyboardInterrupt:
         return 0

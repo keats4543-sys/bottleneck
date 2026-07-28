@@ -14,6 +14,14 @@ The parts, in the order they depend on each other:
     cli         every command, and the dispatch that picks one
 
 Nothing above imports anything below it, which is the only rule here.
+
+    modules/    whole features that plug in, one directory each
+
+Which sits outside that ladder and has a rule of its own: a module may import
+any of the core, and no part of the core imports a module - only the registry in
+modules/__init__.py, which knows them by name and by what they say they answer.
+That is what lets a branch carry a feature without editing a file another branch
+is also editing.
 """
 from .config import VERSION
 

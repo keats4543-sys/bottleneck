@@ -12,12 +12,24 @@ export BOTTLENECK_STATE
 trap 'rm -rf "$BOTTLENECK_STATE"' EXIT
 
 fail=0
-for t in test_*.py; do
+
+# The core's tests, then every module's own, wherever they are. A module keeps
+# its tests beside its code - that is what makes it one directory to carry
+# between branches - so this discovers them rather than listing them, and a
+# branch that adds a module adds no line here either. PYTHONPATH is what lets
+# a module's test say `from harness import bn`.
+for t in test_*.py ../bottleneck/modules/*/tests/test_*.py; do
+    [ -f "$t" ] || continue
     echo "--- $t"
-    python3 "$t" || fail=1
+    PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" python3 "$t" || fail=1
 done
 
-python3 -m py_compile ../bin/bottleneck ../hooks/attention.py ../bottleneck/*.py
+# nullglob, so a checkout carrying no modules compiles what it has rather than
+# handing python a pattern that matched nothing. The core is the case with none.
+shopt -s nullglob
+python3 -m py_compile ../bin/bottleneck ../hooks/*.py ../bottleneck/*.py \
+    ../bottleneck/modules/*.py ../bottleneck/modules/*/*.py
+shopt -u nullglob
 
 # The README pictures are generated from the real renderer, so a change that
 # breaks one breaks the build rather than the reader's first impression of the
