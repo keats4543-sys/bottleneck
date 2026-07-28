@@ -129,13 +129,14 @@ _PANE_FIELDS = ("#{pane_pid}", "#{pane_id}",
                 "#{session_name}:#{window_index}.#{pane_index}",
                 "#{session_name}:#{window_index}",
                 "#{pane_active}#{window_active}",
-                "#{" + ROLE + "}", "#{session_name}", "#{pane_in_mode}")
+                "#{" + ROLE + "}", "#{session_name}", "#{pane_in_mode}",
+                "#{pane_width}")
 
 
 def _read_panes():
     out = tmux_out("list-panes", "-a", "-F", "\t".join(_PANE_FIELDS))
     p = {"by_pid": {}, "cursor": set(), "by_id": {}, "roles": {},
-         "active": set(), "in_mode": set()}
+         "active": set(), "in_mode": set(), "width": {}}
     for line in out.splitlines():
         bits = line.split("\t")
         if len(bits) < 4 or not bits[1]:
@@ -160,7 +161,27 @@ def _read_panes():
         p["roles"][pane] = (field(5), field(6))
         if field(7) == "1":
             p["in_mode"].add(pane)
+        if field(8).isdigit():
+            p["width"][pane] = int(field(8))
     return p
+
+
+def pane_width(pane_id):
+    """How wide tmux says a pane is, or 0.
+
+    What the dashboard lays its rows out to, in place of asking the terminal.
+    The two normally agree and disagree at exactly the wrong moment: a head
+    exiting or landing beside us changes the layout, and the frame we are about
+    to draw is the first thing to be wrong about it. tmux applies the layout
+    before it answers, so asking tmux after a move gets the width the pane has
+    now; the pty is told separately, and a redraw that gets in first lays the
+    whole list out for a width that has already gone - which is then on screen
+    until something else provokes a repaint.
+
+    Off the same cached listing as everything else, so in a refresh where
+    nothing moved it costs nothing at all.
+    """
+    return _panes()["width"].get(pane_id, 0) if pane_id else 0
 
 
 def _pane_flag(pane_id, key, fmt):

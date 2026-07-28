@@ -19,7 +19,8 @@ from .store import (assign_slots, auto_enabled, by_slot, claim_group,
                     move_group, name_group, queue_load, queue_save, set_auto,
                     set_group, set_hold)
 from .tmuxio import (dash_pane, dash_point, dash_register, dash_release,
-                     invalidate, pane_in_mode, tmux, tmux_say, write_keys_conf)
+                     invalidate, pane_in_mode, pane_width, tmux, tmux_say,
+                     write_keys_conf)
 from .transcript import clip
 
 
@@ -776,14 +777,29 @@ def watch():
             raw = None
 
     # Redraw when the pane changes shape rather than at the end of the refresh
-    # it happened in. A head joining the window is a resize, and every line of
-    # the list is laid out for the width it had a moment ago.
-    winch = None
+    # it happened in. A head joining the window is a resize, and so is one
+    # exiting: tmux hands the space over at once, and every line of the frame
+    # already on screen is laid out for the width the pane no longer has.
+    #
+    # Through a pipe rather than a flag alone. A signal does interrupt the wait
+    # below, but python restarts it with the time it had left, so the flag is
+    # not read until the next quarter second - which is a quarter second of the
+    # last frame stretched across the new width. The pipe is one more thing for
+    # the same select to watch, so the wait ends the moment the pane moves.
+    winch, winch_r, winch_w = None, None, None
     if raw and hasattr(signal, "SIGWINCH"):
         try:
+            winch_r, winch_w = os.pipe()
+            os.set_blocking(winch_r, False)
+            os.set_blocking(winch_w, False)
+            signal.set_wakeup_fd(winch_w)
             winch = signal.signal(signal.SIGWINCH, _on_winch)
         except (OSError, ValueError):
             winch = None
+            for fd in (winch_r, winch_w):
+                if fd is not None:
+                    os.close(fd)
+            winch_r = winch_w = None
 
     note = ""
     held = None
@@ -846,8 +862,12 @@ def watch():
             if not any(h["session_id"] == picked for h in heads):
                 cur = current_head(heads)
                 picked = (cur or heads[0])["session_id"] if heads else ""
-            frame = render(heads, note=note, auto=auto_enabled(),
-                           selected=picked)
+            # Asked of tmux rather than of the terminal, and asked here rather
+            # than at the top of the cycle: a raise or a head exiting has just
+            # changed how wide this pane is, and the layout tmux has settled on
+            # is the one this frame has to be drawn for. See pane_width.
+            frame = render(heads, width=pane_width(me) or None, note=note,
+                           auto=auto_enabled(), selected=picked)
             if raw:
                 frame += "\n\n" + c("90", "  " + HELP)
             # Anything that arrived while the frame was being built is about
@@ -878,8 +898,15 @@ def watch():
                 # no longer see them.
                 if not typed:
                     watching = ([sys.stdin] if raw else []) \
-                        + ([ctl] if ctl is not None else [])
+                        + ([ctl] if ctl is not None else []) \
+                        + ([winch_r] if winch_r is not None else [])
                     ready = select.select(watching, [], [], min(left, 0.25))[0]
+                    if winch_r is not None and winch_r in ready:
+                        try:
+                            os.read(winch_r, 256)
+                        except OSError:
+                            pass
+                        continue        # _resized, at the top, decides
                     if ctl is not None and ctl in ready:
                         acted = False
                         for verb, arg in ctl_read(ctl):
@@ -1085,9 +1112,16 @@ def watch():
         sys.stdout.flush()
         if winch is not None:
             try:
+                signal.set_wakeup_fd(-1)
                 signal.signal(signal.SIGWINCH, winch)
             except (OSError, ValueError):
                 pass
+        for fd in (winch_r, winch_w):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
         if raw:
             import termios
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, raw)

@@ -10,7 +10,7 @@ import os
 import time
 
 from . import config
-from .config import ACKS, ATTN, AUTO_FLAG, BINDS, CLAIMS, CYCLE
+from .config import ACKS, ATTN, AUTO_FLAG, BINDS, BURIED, CLAIMS, CYCLE
 from .config import QUEUE
 from .config import SLOTS
 
@@ -392,6 +392,61 @@ def unbind(sid):
         binds_save(book)
         return True
     return False
+
+
+# ------------------------------------------------------------------- graves
+#
+# A head on the other side of a WSL mount cannot be killed, only closed: its pid
+# belongs to another machine's numbering and signalling it here would hit
+# whatever local process is wearing that number. So x closes its pane, which
+# takes the terminal out from under it wherever it is actually running.
+#
+# What it does not do is take away the session file, which is over in the
+# Windows home and written by a process we cannot ask about. So the head came
+# straight back on the next refresh - no pane now, so sorted under "elsewhere",
+# reading `idle`, for ever. You killed it, watched the pane go, and the
+# dashboard went on listing it as a head that was fine.
+#
+# There is no /proc to settle it with, but there is evidence: we closed its
+# terminal at a known moment, and it has written nothing since. That is what is
+# written down here. It is not a claim that the process is gone - it is the
+# reason the row says so, and it lapses the instant the head writes anything,
+# because a head that is still working is still a head whatever we did to its
+# pane.
+
+def buried_load():
+    return {str(k): v for k, v in read_json(BURIED, {}).items()
+            if isinstance(v, dict)}
+
+
+def bury(sid, stamp, now=None):
+    """Note that we closed this head's terminal, and what it had written by then."""
+    sid = safe_sid(sid)
+    if not sid:
+        return False
+    book = buried_load()
+    book[sid] = {"at": time.time() if now is None else now,
+                 "stamp": float(stamp or 0)}
+    write_json(BURIED, book)
+    return True
+
+
+def unbury(sid):
+    """Forget a burial - the head has written since, or its record has gone."""
+    book = buried_load()
+    if book.pop(safe_sid(sid), None) is None:
+        return False
+    write_json(BURIED, book)
+    return True
+
+
+def grave_stale(grave, last_ts):
+    """Has this head done anything since we closed its terminal?
+
+    A second of slack, the same as a hold: the stamp we buried it with is the
+    one being compared against, and equal is not "since".
+    """
+    return float(last_ts or 0) > float((grave or {}).get("stamp") or 0) + 1
 
 
 def set_hold(sid, when):

@@ -15,10 +15,12 @@ from .panes import (auto_raise, claude_cmd, focus, kill_head, next_or_park,
                     park, reload_all, restart_here, send_go, spawn, start)
 from .tmuxio import write_keys_conf
 from .procs import claude_procs, kill_pid, proc_start
-from .store import (assign_slots, auto_enabled, by_slot, claim_group,
-                    clear_attention, group_ids, group_label, group_rank,
-                    mark_seen, move_group, name_group, queue_load, queue_save,
-                    set_auto, set_group, set_hold)
+from .store import (assign_slots, auto_enabled, buried_load, by_slot,
+                    claim_group, clear_attention, grave_stale, group_ids,
+                    group_label, group_rank, mark_seen, move_group, name_group,
+                    queue_load, queue_save, set_auto, set_group, set_hold,
+                    unbury)
+from .transcript import transcript_for
 from .tmuxio import (dash_pane, pane_window, tmux, tmux_out, tmux_say)
 from .ui import (HELP, RESTART, bar_text, ordinal, render, render_sessions,
                  watch)
@@ -26,6 +28,24 @@ from .ui import (HELP, RESTART, bar_text, ordinal, render, render_sessions,
 from .config import ATTN
 
 from .config import ACKS, HOME, SESSIONS
+
+def last_write(rec, sid):
+    """When a head last wrote anything, as well as this side can tell.
+
+    For a head we cannot ask /proc about, this is the whole of the liveness
+    question. The record's own stamp moves only when the status changes, so the
+    transcript is the better witness where there is one; the newest of the two
+    is the answer either way.
+    """
+    stamps = [(rec.get("statusUpdatedAt") or rec.get("updatedAt") or 0) / 1000.0]
+    path = transcript_for(sid, rec.get("cwd") or "") if sid else None
+    if path:
+        try:
+            stamps.append(os.path.getmtime(path))
+        except OSError:
+            pass
+    return max(stamps)
+
 
 USAGE = """bottleneck - one tmux view over every local Claude Code head.
 
@@ -161,18 +181,48 @@ def main(argv):
         # stop showing up here and in `claude agents`.
         import shutil
         n = 0
-        for f in sorted(os.listdir(SESSIONS)) if os.path.isdir(SESSIONS) else []:
-            if not f.endswith(".json"):
-                continue
-            path = os.path.join(SESSIONS, f)
-            try:
-                d = json.load(open(path))
-            except (OSError, ValueError):
-                continue
-            if not os.path.isdir(f"/proc/{d.get('pid')}"):
-                os.remove(path)
+        graves = buried_load()
+        seen_sids = set()
+        # Every home, not just ours. A head on the other side of a WSL mount
+        # leaves its record over there, and nothing else ever takes it away:
+        # its pid is not ours to check, so the /proc rule below cannot speak
+        # for it, and it came back on every refresh as a head that was fine.
+        # What can speak for it is that we closed its terminal ourselves and it
+        # has written nothing since - which is what a burial records, and what
+        # the row has been saying since. See bury() in store.py.
+        for at, where in enumerate(config.SESSION_DIRS):
+            for f in sorted(os.listdir(where)) if os.path.isdir(where) else []:
+                if not f.endswith(".json"):
+                    continue
+                path = os.path.join(where, f)
+                try:
+                    d = json.load(open(path))
+                except (OSError, ValueError):
+                    continue
+                sid = d.get("sessionId") or ""
+                seen_sids.add(sid)
+                grave = graves.get(sid)
+                gone = (grave is not None
+                        and not grave_stale(grave, last_write(d, sid)))
+                if not at and not gone:
+                    gone = not os.path.isdir(f"/proc/{d.get('pid')}")
+                if not gone:
+                    continue
+                try:
+                    os.remove(path)
+                except OSError as exc:
+                    print(f"could not remove {path}: {exc}")
+                    continue
+                unbury(sid)
+                seen_sids.discard(sid)
                 print(f"removed stale session file: {f} ({d.get('name')})")
                 n += 1
+
+        # Burials for heads whose record has gone anyway - nothing left to be
+        # about.
+        for sid in list(graves):
+            if sid not in seen_sids:
+                unbury(sid)
 
         live_jobs = set()
         for f in os.listdir(SESSIONS) if os.path.isdir(SESSIONS) else []:

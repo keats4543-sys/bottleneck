@@ -94,6 +94,12 @@ AUTO_FLAG = os.path.join(STATE, "autoraise")
 CATALOG = os.path.join(STATE, "catalog.json")
 
 
+# Heads whose terminal we closed on purpose - see bury() in store.py. Only
+# heads we cannot ask /proc about get here, which in practice means the ones
+# running on the other side of a WSL mount.
+BURIED = os.path.join(STATE, "buried.json")
+
+
 CYCLE = os.path.join(STATE, "cycle.json")
 
 

@@ -515,7 +515,17 @@ What they can do here depends on how they were started:
   queue under an `elsewhere` heading, keep their state and summary, and are
   skipped by the go-on key.
 
-Neither kind is ever called dead. There is no `/proc` to ask, and the session
+Killing one is closing it. There is no pid here to signal, so `x` closes the
+pane, which takes the terminal out from under the head wherever it is actually
+running. What it cannot do is take away the session file, which is in the
+Windows home — so the head used to come straight back on the next refresh, no
+pane now, sorted under `elsewhere`, reading `idle`, for ever. It now reads
+`dead — killed - its pane is gone, quiet since`, on the evidence that its
+terminal was closed at a known moment and nothing has been written since. That
+is not proof the process is gone, and it lets go of itself the instant the head
+writes anything. `bottleneck reap` clears the record for good.
+
+Neither kind is ever called dead on its own. There is no `/proc` to ask, and the session
 file's stamp only moves when the status changes - so its age is the time since
 the last transition, not since the head last did anything, and reading it as
 liveness buried heads that were parked waiting on you or an hour into one long

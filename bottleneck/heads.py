@@ -5,9 +5,10 @@ import time
 from . import config
 from .config import NEEDS_ATTENTION, QUIET_SECS, STALL_SECS, STATES
 from .procs import FOREIGN, local_live, session_records, tty_of
-from .store import (ack_ts, assign_slots, binds_apply, bound_pane,
-                    claims_apply, group_label, group_rank, group_ids, held_at,
-                    hold_stale, queue_load, read_attention, set_hold, unbind)
+from .store import (ack_ts, assign_slots, binds_apply, bound_pane, buried_load,
+                    claims_apply, grave_stale, group_label, group_rank,
+                    group_ids, held_at, hold_stale, queue_load, read_attention,
+                    set_hold, unbind, unbury)
 from .tmuxio import (dash_pane, locate, pane_window, panes_by_id,
                      panes_by_pid)
 from .transcript import read_step, subagent_seen, transcript_for
@@ -24,6 +25,7 @@ def collect():
     binds = binds_apply(named)
 
     book = queue_load()
+    graves = buried_load()
     order = group_ids(book)
     panes, cursor = panes_by_pid()
     main_win = pane_window(dash_pane()) if panes else ""
@@ -133,6 +135,21 @@ def collect():
             state, reason = "WORKING", f"quiet for {fmt_age(idle_for)}"
         else:
             state, reason = "WORKING", ""
+
+        # A head whose terminal we closed on purpose. There is no /proc to ask
+        # about it - that is why closing the pane was all we could do - so the
+        # row stands on what we do know: we took its terminal away at a known
+        # moment and it has written nothing since. It is not proof the process
+        # is gone. It is better evidence than the session file it left behind,
+        # which says only that it once existed, and which nothing on this side
+        # of the mount can remove. Anything written since and the burial is
+        # wrong and lets go of itself, the way a hold does.
+        grave = graves.get(sid) if sid else None
+        if grave:
+            if grave_stale(grave, last_ts):
+                unbury(sid)
+            else:
+                state, reason = "DEAD", "killed - its pane is gone, quiet since"
 
         # A hold is against one finished state, not against the head. Anything
         # new - a fresh turn, another tool call - and it has gone stale, so it

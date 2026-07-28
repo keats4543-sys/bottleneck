@@ -206,6 +206,24 @@ check("and nothing was signalled", killed, [])
 check("even though that pid is alive here", os.path.isdir(f"/proc/{COLLIDING}"), True)
 check("the note is torn up with it", m.bound_pane(m.binds_load(), "sid-win"), "")
 
+print("\nand it stays killed, because nothing here can take its record away")
+# The session file is in the Windows home, written by a process this side
+# cannot ask about, and no /proc rule can ever clear it. So the head came
+# straight back on the next refresh - no pane now, sorted under "elsewhere",
+# reading idle - as a head that was fine. What we do know is that we took its
+# terminal away at a known moment and it has written nothing since.
+gone = {h["session_id"]: h for h in m.collect()}["sid-win"]
+check("the row says what was done to it", gone["state"], "DEAD")
+check("and why it says so", "pane is gone" in gone["reason"], True)
+check("it is not in the queue", gone["attention"], False)
+
+# The one thing that would mean we were wrong about it.
+os.utime(WINTX, None)
+back = {h["session_id"]: h for h in m.collect()}["sid-win"]
+check("a head that writes again was not dead after all",
+      back["state"] != "DEAD", True)
+check("and the burial lets go of itself", "sid-win" in m.buried_load(), False)
+
 print("\na pane that will not close says so rather than escalating")
 panes_now["%77"] = (0, "bottleneck:0.1", "bottleneck:0")
 m.tmux = lambda *a, **kw: None          # kill-pane does nothing

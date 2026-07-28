@@ -14,7 +14,7 @@ from .config import (DASH_OPT, HEAD_PCT, HOME, NEEDS_ATTENTION, ROLE,
                      SESSION, SPINUP_SECS, STATES)
 from .heads import fmt_age
 from .procs import kill_pid
-from .store import (bind_pane, claims_load, clear_attention, cycle_state,
+from .store import (bind_pane, bury, claims_load, clear_attention, cycle_state,
                     group_ids, group_label, group_rank, mark_seen, queue_load,
                     set_cycle_state, unbind)
 from .tmuxio import (dash_pane, invalidate, pane_is_active, pane_session,
@@ -780,6 +780,14 @@ def _reap(head):
             if head.get("pane_id") not in panes_by_id():
                 clear_attention(head["session_id"])
                 unbind(head["session_id"])
+                # Its session file is in the Windows home and nothing here can
+                # take it away, so without this the head is back on the next
+                # refresh - no pane, sorted under "elsewhere", reading idle,
+                # for ever. Write down when we closed it and what it had
+                # written by then; collect() reads the row off that until the
+                # head writes something, which is the one thing that would mean
+                # we were wrong. See bury() in store.py.
+                bury(head["session_id"], head.get("last_ts") or 0)
                 return f"killed {name}"
         return f"{name}: its pane will not close - check it where it runs"
 
