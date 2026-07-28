@@ -185,6 +185,15 @@ check("in the place its rank puts it - after 2, before the loose heads",
 check("and the groups with heads read as they did",
       sum("empty" in l for l in heads_of), 1)
 
+print("\nthe group being ranked is marked wherever it lands")
+moving = m.render(rows, width=90, groups=book, ranking="2")
+lines = [l for l in strip(moving).split("\n") if "─" in l]
+check("it wears the mark", [l[0] for l in lines], [" ", "▸", " ", " "])
+check("and is lit rather than dim", "\033[1;93m▸group 2" in moving, True)
+check("the others are not marked", strip(moving).count("▸group"), 1)
+check("ranking nothing marks nothing",
+      "▸" in strip(m.render(rows, width=90, groups=book)), False)
+
 empty_only = m.render([], width=90, groups=[("4", "later")])
 check("a group with no heads at all is still a heading",
       "later  [4]  empty" in strip(empty_only), True)
