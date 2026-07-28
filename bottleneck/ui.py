@@ -285,8 +285,30 @@ def render_sessions(rows, width=None):
             bits.append(r["branch"])
         wheres.append("  ".join(bits))
 
-    wide = max([len(w) for w in wheres] + [0])
-    name_w = max(18, width - 12 - min(wide, 34))
+    # Budget the row exactly, or it wraps and the list is unreadable. The row
+    # is " nn " + age(5) + "  " = 11, then the name, then the optional where
+    # column and the live/pinned tags. Every one of those has to come out of
+    # the terminal's width before the name gets what is left.
+    wide = min(max([len(w) for w in wheres] + [0]), 34)
+    where_w = 2 + wide if wide else 0
+    live = any(r["live"] for r in rows)
+    tags = (6 if live else 0) + (7 if live and any(
+        r.get("pinned") and r["live"] for r in rows) else 0)
+    if width - 11 - tags < 12:
+        # Nothing left to hold them. The tags are a detail; the number you type
+        # and the name you type it for are the list.
+        tags = 0
+    longest = max([len(r["name"]) for r in rows] + [0])
+    name_w = max(4, min(longest, width - 11 - where_w - tags))
+    if wide:
+        # A narrow terminal is better off dropping the where column than
+        # cutting the names down to nothing - the name is what you pick by.
+        if name_w < 12:
+            wide = where_w = 0
+            name_w = max(4, min(longest, width - 11 - tags))
+        else:
+            wide = min(wide, max(0, width - 11 - name_w - tags - 2))
+            where_w = 2 + wide if wide else 0
     hdr = f" {'#':>2} {'AGE':>5}  {'NAME':<{name_w}}"
     if wide:
         hdr += "  WHERE"
@@ -295,15 +317,15 @@ def render_sessions(rows, width=None):
         age = fmt_age(now - r["last_seen"]) if r["last_seen"] else "-"
         row = (f" {i:>2} " + c("90", age.rjust(5)) + "  "
                + c("1;96" if r["live"] else "97", r["name"][:name_w].ljust(name_w)))
-        if where:
-            row += "  " + c("90", where[:34])
-        if r["live"]:
+        if where and wide:
+            row += "  " + c("90", where[:wide])
+        if r["live"] and tags:
             row += c("1;96", "  live")
         # Only worth saying on a live row: that is the only time a pin is
         # holding anything off, and the only time the two names can differ.
-        if r.get("pinned") and r["live"]:
+        if r.get("pinned") and r["live"] and tags:
             row += c("90", " pinned")
-        lines.append(row)
+        lines.append(row.rstrip())
     if not rows:
         lines.append(c("90", "  no prior sessions catalogued"))
     return "\n".join(lines)
@@ -1109,10 +1131,15 @@ def watch():
                     if not rows:
                         note = "no prior sessions to resume"
                         break
+                    try:
+                        term_w = os.get_terminal_size().columns
+                    except OSError:
+                        term_w = 78
                     sys.stdout.write(
                         "\033[H\033[2J"
-                        + c("1;97;44", " resume a session ".ljust(78)) + "\n"
-                        + render_sessions(rows) + "\n")
+                        + c("1;97;44",
+                            " resume a session ".ljust(term_w)[:term_w]) + "\n"
+                        + render_sessions(rows, width=term_w) + "\n")
                     sys.stdout.flush()
                     pick = ask("resume which? [number, Esc to cancel] ")
                     if pick is BACK or not pick:

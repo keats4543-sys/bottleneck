@@ -123,6 +123,35 @@ m.render_sessions(m.session_list(limit=0), width=60)
 m.render_sessions([], width=60)
 check("render survives an empty list", True, True)
 
+# --- the listing fits the terminal -------------------------------------------
+# The resume menu is a numbered list you read to pick a number off. A row wider
+# than the terminal wraps onto the next line, and the whole list stops being
+# readable - which is what happens when the row's fixed parts (the where column,
+# the live and pinned tags) are not taken out of the width before the name is.
+import re                                       # noqa: E402
+import time                                     # noqa: E402
+
+plain = re.compile(r"\033\[[0-9;]*m")
+fat = [
+    dict(session_id="w1", name="claude-a-rather-long-head-name-here",
+         cwd="/somewhere/else/entirely", branch="claude-some-long-branch",
+         last_seen=time.time() - 300, live=True, pinned=True),
+    dict(session_id="w2", name="short", cwd="/another/place",
+         branch="claude-main", last_seen=time.time() - 9000,
+         live=False, pinned=False),
+]
+for w in (30, 40, 60, 80, 100, 120, 200):
+    over = [len(plain.sub("", line))
+            for line in m.render_sessions(fat, width=w).split("\n")
+            if len(plain.sub("", line)) > w]
+    check(f"no row runs past a {w}-column terminal", over, [])
+
+narrow = m.render_sessions(fat, width=44)
+check("a narrow terminal drops the where column, not the name",
+      "entirely" in plain.sub("", narrow), False)
+check("and the name still has something left of it",
+      "claude-a-rather" in plain.sub("", narrow), True)
+
 # --- the file is not rewritten for a clock tick ------------------------------
 # last_seen moves every pass by definition, so comparing whole records made
 # every refresh a rewrite of the whole book - which grows with every session you
