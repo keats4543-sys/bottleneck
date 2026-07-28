@@ -136,7 +136,7 @@ def spinner(now=None):
     return SPIN[int(now / max(0.05, SPINUP_TICK)) % len(SPIN)]
 
 
-def render(heads, width=None, note="", auto=None, selected=""):
+def render(heads, width=None, note="", auto=None, selected="", loud=False):
     if width is None:
         try:
             width = os.get_terminal_size().columns
@@ -250,7 +250,15 @@ def render(heads, width=None, note="", auto=None, selected=""):
         lines.append(c("90", "  no heads yet - press n to start one"))
     if note:
         lines.append("")
-        lines.append(c("1;93", "  " + note[:width - 3]))
+        # A loud note is one you have to answer, not one telling you what just
+        # happened - which for now is only "are you sure you want to quit". The
+        # ordinary note is a line of yellow in a list full of colour, and it is
+        # easy to read past when you are moving quickly; this is a bar across
+        # the pane, the same shape as the header, so it cannot be taken for a
+        # row. It says what it wants in the text, because a colour on its own
+        # is not a question.
+        lines.append(c("1;97;41", ("  " + note).ljust(width)[:width]) if loud
+                     else c("1;93", "  " + note[:width - 3]))
     return "\n".join(lines)
 
 
@@ -302,8 +310,41 @@ def render_sessions(rows, width=None):
 
 
 HELP = ("↑↓ select  ←→ group  ⏎ open  1-9 focus  j next/park  G group  N name  [ ] rank  h hold  "
-        "a auto  n new  r resume  x kill  c clear  g go  R reload  q quit  "
+        "a auto  n new  r resume  x kill  c clear  g go  R reload  qq quit  "
         "esc back")
+
+
+# Quitting takes two presses of q.
+#
+# The dashboard is the thing that knows which head wants you. Closing it does
+# not stop a single head - they are separate processes in their own windows and
+# never notice - but it does take away the one view of them, the queue's key
+# bindings and the counter in the status line, and getting it back means
+# finding a shell and starting it again. That is a lot to hang on one key that
+# sits next to nothing else you press, and a fleet is exactly the situation
+# where you are typing quickly at something you have half-read.
+#
+# The second press has to be soon, or it is not a confirmation of anything - it
+# is a q you pressed a minute later for some other reason, landing on a
+# question you had forgotten you were being asked. Five seconds, and any other
+# key answers no.
+QUIT_CONFIRM = 5.0
+
+
+QUIT_NOTE = "you are trying to quit - press q again to leave, any other key to stay"
+
+
+def quit_press(quitting, now=None):
+    """One press of q. Returns (leave, quitting, note).
+
+    Its own function because watch() is a long loop and this is a small rule
+    with a clock in it, which is the kind of thing that is worth being able to
+    ask about directly.
+    """
+    now = time.time() if now is None else now
+    if quitting and now - quitting <= QUIT_CONFIRM:
+        return True, 0.0, ""
+    return False, now, QUIT_NOTE
 
 
 # What watch() returns when you press R. Not an exit code - main() reads it and
@@ -805,6 +846,7 @@ def watch():
     held = None
     picked = ""        # session id the arrow keys are on
     typed = ""         # bytes the terminal sent that we have not read yet
+    quitting = 0.0     # when q was pressed, while the answer is still open
     try:
         # The alternate screen, because this is a screen and not a transcript.
         #
@@ -862,12 +904,22 @@ def watch():
             if not any(h["session_id"] == picked for h in heads):
                 cur = current_head(heads)
                 picked = (cur or heads[0])["session_id"] if heads else ""
+            # The question outlives the frame it was asked in - the note line
+            # is cleared after every redraw, and a warning that vanished while
+            # the key it warns about still quit would be worse than no warning
+            # at all. It stands until it is answered or it times out, and it
+            # says so over anything else waiting to be said.
+            if quitting and time.time() - quitting > QUIT_CONFIRM:
+                quitting = 0.0
+            if quitting:
+                note = QUIT_NOTE
             # Asked of tmux rather than of the terminal, and asked here rather
             # than at the top of the cycle: a raise or a head exiting has just
             # changed how wide this pane is, and the layout tmux has settled on
             # is the one this frame has to be drawn for. See pane_width.
             frame = render(heads, width=pane_width(me) or None, note=note,
-                           auto=auto_enabled(), selected=picked)
+                           auto=auto_enabled(), selected=picked,
+                           loud=bool(quitting))
             if raw:
                 frame += "\n\n" + c("90", "  " + HELP)
             # Anything that arrived while the frame was being built is about
@@ -922,6 +974,12 @@ def watch():
                 key, typed = split_key(typed)
                 if not key:
                     continue
+                # Any key that is not q answers no. The one you pressed still
+                # does whatever it does - the question was never modal, and a
+                # keystroke swallowed by a prompt you had stopped reading would
+                # be its own small betrayal.
+                if quitting and key != "q":
+                    quitting = 0.0
 
                 if key.startswith("\x1b") and len(key) > 1:
                     way = arrow_of(key[1:])
@@ -933,7 +991,15 @@ def watch():
                                                 -1 if way == "up" else 1)
                     break
 
-                if key in ("q", "\x03", "\x04"):
+                if key == "q":
+                    leave, quitting, note = quit_press(quitting)
+                    if leave:
+                        return 0
+                    break
+                # Ctrl-C and Ctrl-D are not a key you land on by accident on
+                # the way to another one, and both already mean "stop this"
+                # everywhere else in the program. They go straight out.
+                if key in ("\x03", "\x04"):
                     return 0
                 if key in ("\r", "\n"):
                     # Enter opens what you have pointed at. Selecting and

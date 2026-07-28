@@ -73,5 +73,36 @@ check("shift with a page key too", m.arrow_of("[6;2~"), "pgdn")
 check("shift-tab is not an arrow", m.arrow_of("[Z"), "")
 check("junk is not an arrow", m.arrow_of("nonsense"), "")
 
+
+
+print("\nquitting takes two presses")
+# The dashboard is the only view of the fleet and the only thing maintaining
+# the queue's bindings and the status-line counter. One key next to nothing
+# else you press is too little to hang that on.
+q1 = m.quit_press(0.0, now=1000.0)
+check("one press does not leave", q1[0], False)
+check("it starts the clock", q1[1], 1000.0)
+check("and says what is being asked", q1[2], m.QUIT_NOTE)
+check("a second press soon after leaves",
+      m.quit_press(1000.0, now=1002.0)[0], True)
+check("and takes the question down with it",
+      m.quit_press(1000.0, now=1002.0)[1:], (0.0, ""))
+# A q pressed a minute later is not an answer to a question you have forgotten
+# you were asked - it is the first press again.
+late = m.quit_press(1000.0, now=1000.0 + m.QUIT_CONFIRM + 1)
+check("a press after the window asks again rather than quitting",
+      (late[0], late[2]), (False, m.QUIT_NOTE))
+
+print("\nand it is not a line you can read past")
+rows = []
+plain = m.render(rows, width=60, note="parked", auto=True)
+loud = m.render(rows, width=60, note=m.QUIT_NOTE, auto=True, loud=True)
+check("an ordinary note is a line of yellow", "\033[1;93m" in plain, True)
+check("a loud one is a bar", "\033[1;97;41m" in loud, True)
+check("across the whole pane",
+      max(len(l) for l in loud.split("\033[1;97;41m")[1].split("\033[0m")[0]
+          .split("\n")), 60)
+check("saying what it wants", "press q again" in loud, True)
+
 print("\nall pass" if not FAILED else f"\n{len(FAILED)} FAILED")
 raise SystemExit(1 if FAILED else 0)

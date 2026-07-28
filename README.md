@@ -137,7 +137,15 @@ Single keys in the dashboard pane, no prefix:
 | `h` | hold this head — done, but below the heads still working |
 | `c` | clear all attention flags |
 | `R` | reload — hand the pane to the current code (see below) |
-| `q` | quit the dashboard |
+| `q` `q` | quit the dashboard — twice, within five seconds |
+
+Quitting asks first. Closing the dashboard stops no heads — they are separate
+processes in their own windows and never notice — but it does take away the one
+view of them, the queue's key bindings and the counter in the status line, and
+one key next to nothing else you press is too little to hang that on. The first
+`q` puts a bar across the pane saying you are trying to quit; a second within
+five seconds leaves, and any other key stays. `Ctrl-C` and `Ctrl-D` still go
+straight out — they are not keys you land on by accident.
 
 While typing at a head, no prefix needed:
 
