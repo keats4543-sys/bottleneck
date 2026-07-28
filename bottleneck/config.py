@@ -171,7 +171,25 @@ CLAUDE = os.environ.get("BOTTLENECK_CLAUDE", "").strip()
 SHELL = os.environ.get("SHELL") or "/bin/bash"
 
 
-STALL_SECS = int(os.environ.get("BOTTLENECK_STALL_SECS", "300"))
+# Two different lengths of quiet, because they mean two different things.
+#
+# A head writes to its transcript when something happens - a message, a tool
+# call, a tool result - and not otherwise. So the time since its last write is
+# not "how long it has been stuck", it is "how long this step is taking", and
+# plenty of ordinary steps take a while: a test suite, a build, an install, a
+# subagent reading half a repository. Five minutes of that was being called
+# STALLED, which is one of the four states that ask for you - so the dashboard
+# spent its attention column on heads that were working exactly as intended,
+# and a state that cries wolf is a state you learn to scroll past.
+#
+# QUIET_SECS is where a working head starts saying how long it has been at it.
+# It is a fact, not a summons: the row stays `working` and stays out of the
+# queue. STALL_SECS is where the same silence stops being explicable by a long
+# step and starts being worth your going and looking - that one asks for you.
+QUIET_SECS = int(os.environ.get("BOTTLENECK_QUIET_SECS", "300"))
+
+
+STALL_SECS = int(os.environ.get("BOTTLENECK_STALL_SECS", "1800"))
 
 
 # How long a head we have just opened has to turn up in the list before the
@@ -179,7 +197,24 @@ STALL_SECS = int(os.environ.get("BOTTLENECK_STALL_SECS", "300"))
 # moment the head appears, a second or two after launch. It exists for the
 # launch that never becomes a head at all, so a pane printing "command not
 # found" cannot hold the queue for the rest of the day.
+#
+# It stops the queue waiting. It does not take the row away: the pane is still
+# there and something is still in it, and that is the moment you most want it
+# on the list rather than off it. See pending() in panes.py.
 SPINUP_SECS = float(os.environ.get("BOTTLENECK_SPINUP_SECS", "30"))
+
+
+# How often to redraw while something is starting. The list is otherwise worth
+# redrawing every couple of seconds - nothing on it moves faster than that -
+# but a spinner that ticks twice a minute is not a spinner, and the seconds
+# between pressing n and the head appearing are exactly the ones where you want
+# telling that anything is happening at all.
+SPINUP_TICK = float(os.environ.get("BOTTLENECK_SPINUP_TICK", "0.5"))
+
+
+# The spinner itself. Frames rather than a bar, because there is no progress to
+# report: the only thing being said is that we are still here and still waiting.
+SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
 REFRESH = float(os.environ.get("BOTTLENECK_REFRESH", "2"))
@@ -334,6 +369,11 @@ STATES = {
     "WAITING": (1, "WAITING", "1;93"),
     "DONE":    (2, "DONE",    "1;92"),
     "STALLED": (3, "STALLED", "1;95"),
+    # A pane we opened that is not a head yet. It is not working - there is
+    # nothing there to work - and it is not waiting on you either, until it
+    # asks something, at which point it stops being STARTING and becomes the
+    # WAITING it actually is.
+    "STARTING": (5, "starting", "1;94"),
     "WORKING": (6, "working", "96"),
     # A head you have seen and put aside. It is finished, and you decided it can
     # wait - so it sorts below heads that are still working, which is the whole

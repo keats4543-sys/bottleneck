@@ -223,6 +223,23 @@ def pane_in_mode(pane_id):
     return _pane_flag(pane_id, "in_mode", "#{pane_in_mode}")
 
 
+def pane_text(pane_id, lines=40):
+    """What is on the screen in a pane right now, or "".
+
+    The one thing about a pane that cannot be had from the listing, and the
+    only way to know anything at all about a pane whose process is not a head
+    yet - a claude asking whether it may read this folder has written no
+    session file, so its own screen is the whole of the evidence.
+
+    Not cached, and deliberately not called on every pane: it is a tmux
+    round-trip each, and the panes worth asking about are the handful we have
+    opened and are still waiting on.
+    """
+    if not pane_id:
+        return ""
+    return tmux_out("capture-pane", "-p", "-t", pane_id, "-S", f"-{int(lines)}")
+
+
 def pane_session(pane_id):
     """Which session a pane belongs to, out of the listing we already have."""
     return pane_roles().get(pane_id, ("", ""))[1]

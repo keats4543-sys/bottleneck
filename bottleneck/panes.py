@@ -1,5 +1,6 @@
 """Moving heads in and out of the pane beside the dashboard."""
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -11,21 +12,35 @@ import time
 from . import config
 from .config import (DASH_OPT, HEAD_PCT, HOME, NEEDS_ATTENTION, ROLE,
                      SESSION, SPINUP_SECS, STATES)
+from .heads import fmt_age
 from .procs import kill_pid
-from .store import (bind_pane, clear_attention, cycle_state, mark_seen,
+from .store import (bind_pane, claims_load, clear_attention, cycle_state,
+                    group_ids, group_label, group_rank, mark_seen, queue_load,
                     set_cycle_state, unbind)
 from .tmuxio import (dash_pane, invalidate, pane_is_active, pane_session,
-                     pane_window, panes_by_id, panes_in_window, tmux,
-                     tmux_many, tmux_out, tmux_say, write_keys_conf)
+                     pane_text, pane_window, panes_by_id, panes_by_pid,
+                     panes_in_window, tmux, tmux_many, tmux_out, tmux_say,
+                     write_keys_conf)
+from .transcript import clip
 
 
 # -------------------------------------------------------------- pane placement
 
-def evict_heads(dash, heads):
-    """Move any head sharing the main window back out to its own window."""
+def evict_moves(dash, heads):
+    """The commands that send anything sharing the main window back out.
+
+    Handed back rather than run, because every caller has a move of its own to
+    make straight afterwards and the two have to happen in one exec. A head
+    broken out and nothing put back yet leaves the dashboard alone in the
+    window - which is to say full width, for as long as it takes to get another
+    tmux call away. tmux redraws the client at each of them, so that flash is
+    on screen: a list laid out for a third of the screen, stretched across all
+    of it, and back. Both moves in one command list and the client redraws once,
+    with the layout it is going to keep.
+    """
     win = pane_window(dash)
     if not win:
-        return
+        return []
     moves = []
     for pane_id in panes_in_window(win, besides=dash):
         label = "head"
@@ -36,6 +51,12 @@ def evict_heads(dash, heads):
         moves.append(["break-pane", "-d", "-n",
                       label[:32].replace(".", "-").replace(":", "-"),
                       "-s", pane_id])
+    return moves
+
+
+def evict_heads(dash, heads):
+    """Move any head sharing the main window back out to its own window."""
+    moves = evict_moves(dash, heads)
     if moves:
         tmux_many(*moves)
         invalidate()
@@ -73,22 +94,26 @@ def focus(head, heads, select=True, ack=True):
             tmux("select-pane", "-t", head["pane_id"])
         return True
 
-    evict_heads(dash, heads)
     # -d leaves the joined pane unselected. Without it tmux moves the cursor
     # into it, which would hijack your typing on an unattended raise.
     args = ["join-pane", "-h", "-l", f"{HEAD_PCT}%"]
     if not select:
         args.append("-d")
     args += ["-s", head["pane_id"], "-t", dash]
-    # The select-pane rides along on the same exec: two round-trips for one
-    # move is most of what makes the go-on key feel slow.
-    r = tmux_many(args, ["select-pane", "-t", head["pane_id"]]) if select \
-        else tmux(*args)
+    # The eviction and the select-pane ride along on the same exec: two
+    # round-trips for one move is most of what makes the go-on key feel slow,
+    # and three of them is a layout you watch being assembled.
+    moves = evict_moves(dash, heads) + [args]
+    if select:
+        moves.append(["select-pane", "-t", head["pane_id"]])
+    r = tmux_many(*moves)
     invalidate()
     if not r or r.returncode != 0:
         tmux_say(f"bottleneck: could not move {head['name']} in")
         return False
-    if ack:
+    # A pane that is not a head yet has no flags to clear and no turn to mark
+    # seen - what it wants is answered in the pane, not here.
+    if ack and not head.get("pending"):
         clear_attention(head["session_id"])
     return True
 
@@ -118,8 +143,8 @@ def park(heads):
     # its neighbour moved out, and asking now costs nothing while the listing is
     # still good. Asking after would mean paying for a fresh one.
     sess = pane_session(dash)
-    evict_heads(dash, heads)
-    moves = [["select-window", "-t", dash], ["select-pane", "-t", dash]]
+    moves = evict_moves(dash, heads) + [["select-window", "-t", dash],
+                                        ["select-pane", "-t", dash]]
     if sess:
         moves.append(["switch-client", "-t", sess])
     tmux_many(*moves)
@@ -246,11 +271,72 @@ def answered(head):
     head["reason"] = ""
 
 
-_starting = None        # (pane_id, label, deadline) for a head we have opened
+_starting = []          # panes we have opened that are not heads yet
 
 
-def starting(heads, now=None):
-    """The name of a head we have just opened that has not turned up yet, or "".
+# What a pane looks like when whatever is in it wants an answer before it will
+# go any further. A numbered choice is the shape every one of them has, with or
+# without a box around it: "❯ 1. Yes, I trust this folder".
+_OPTION = re.compile(r"^[❯>*\s]*\d+[.)]\s+\S")
+
+
+def _bare(line):
+    """One line off a pane with the box it was drawn in taken away."""
+    return line.strip().strip("│┃|╭╮╰╯┌┐└┘┏┓┗┛─━ ").strip()
+
+
+def pane_asks(text):
+    """What a pane is asking, or "" if it is not asking anything.
+
+    The one everybody meets is the trust prompt - "Do you trust the files in
+    this folder?", which claude puts up in a directory it has not run in
+    before. Until it is answered there is no session id, no session file and no
+    transcript, so nothing the dashboard normally reads exists yet: the head is
+    sat in a pane waiting for a keystroke, and the list it should be at the top
+    of cannot see it at all. Its own screen is the only evidence there is.
+
+    Read as a shape rather than as a sentence, because the sentence changes -
+    the wording of the trust prompt has changed at least once, and the theme
+    picker on a first ever run is a different question entirely. What they have
+    in common is a numbered list of answers with the question above it. The
+    options are what say this is a prompt and not just output; the last
+    question mark above them is what to quote.
+
+    The question mark is not at the end of its line. The prompt is a wrapped
+    paragraph - "Quick safety check: Is this a project you created or one you
+    trust? (Like your own code...)" - so what is wanted is the sentence ending
+    at the last "?", not the line it happens to sit on.
+    """
+    lines = [b for b in (_bare(l) for l in text.splitlines()[-60:]) if b]
+    at = next((i for i, l in enumerate(lines) if _OPTION.match(l)), -1)
+    if at < 0:
+        return ""
+    for line in reversed(lines[:at]):
+        if "?" not in line:
+            continue
+        line = line[:line.rindex("?") + 1]
+        # Only the sentence that ends in the question. What comes before it is
+        # a preamble, and on a dashboard it is the part nobody reads.
+        for stop in (". ", "! ", "? "):
+            head = line.rfind(stop, 0, len(line) - 1)
+            if head != -1:
+                line = line[head + len(stop):]
+        return clip(line, 150)
+    # A prompt we cannot quote is still a prompt - the options are there.
+    return "waiting on an answer in the pane"
+
+
+def _last_said(text):
+    """The last thing a pane put on the screen, for a launch that went wrong."""
+    for line in reversed(text.splitlines()[-40:]):
+        said = _bare(line)
+        if said:
+            return said[:120]
+    return ""
+
+
+def pending(heads, now=None):
+    """Rows for the panes we have opened that are not heads yet.
 
     There are seconds between opening the pane and the head existing: claude
     picks its session id in another process, and until it has written a session
@@ -262,32 +348,126 @@ def starting(heads, now=None):
     so the first waiting head in the queue was being raised into the pane the
     new one was still coming up in - and focus() breaks the sitting pane out to
     a window of its own to make room, so the head you had just asked for was
-    torn out mid-launch and left somewhere you were not looking. With the
-    cursor on the dashboard it was worse: an empty main pane is also the one
-    case a raise takes your cursor with it, so the keys you were about to type
-    at the new head went to a different one.
+    torn out mid-launch and left somewhere you were not looking.
 
-    So a spawn says what it opened, and the queue does not push into the main
-    pane until that head is in the list. Three things end the wait, and the
-    common one is the first: the head turns up, the pane goes away, or
-    SPINUP_SECS passes without either - the backstop for a launch that never
-    becomes a head, which must not hold the queue indefinitely.
+    The window is normally a second or two. It is not bounded: claude asks
+    whether it may read a folder it has not run in before, and it will sit on
+    that question for as long as you take to answer it. Held off the list, that
+    was the worst case this has - a pane asking you something, on a dashboard
+    whose whole job is to tell you which pane is asking you something, showing
+    nothing. Worse once the backstop expired: the record was dropped, the pane
+    became fair game, and the question you had not answered was broken out to a
+    window you were not looking at.
 
-    Only automatic movement waits on this. `j`, Alt+j and the go-on key are you
+    So the pane gets a row of its own until it is a head or it is gone, and the
+    row says what it is doing - coming up, asking you something, or sat there
+    long enough that something has clearly gone wrong. Only the first of those
+    holds the queue off the main pane, and only for SPINUP_SECS: a pane that is
+    asking you something is not a reason to stop the rest of the fleet
+    reaching you, and neither is one that has printed "command not found" and
+    will sit there until somebody closes it.
+    """
+    global _starting
+    if not _starting:
+        return []
+    now = time.time() if now is None else now
+    known = panes_by_id()
+    _, cursor = panes_by_pid()
+    main_win = pane_window(dash_pane())
+    claims, book = claims_load(), queue_load()
+    order = group_ids(book)
+    kept, rows = [], []
+
+    for at in _starting:
+        pane, label = at["pane"], at["label"]
+        # The head has turned up and can speak for itself. Two rows for one
+        # pane would be worse than the none we started with.
+        if any(h.get("pane_id") == pane for h in heads):
+            continue
+        where = known.get(pane)
+        if where is None:
+            continue                    # the pane has gone; so has the wait
+        kept.append(at)
+
+        text = pane_text(pane)
+        asked = pane_asks(text)
+        elapsed = max(0.0, now - at["at"])
+        if asked:
+            state, reason, holds, spin = "WAITING", f"asks: {asked}", False, False
+        elif now < at["until"]:
+            state, reason = "STARTING", "starting up - waiting for claude"
+            holds, spin = True, True
+        else:
+            # Long past the point where a head should have appeared. What the
+            # pane last printed is the only thing anyone can act on - it is
+            # usually "command not found", and it is the answer to the question
+            # you would open the pane to ask.
+            said = _last_said(text)
+            # No spinner. Nothing is coming, and an animation on a pane that
+            # has stopped is the dashboard telling you to keep waiting.
+            state, holds, spin = "STARTING", False, False
+            reason = (f"no head after {fmt_age(elapsed)} - the pane says: {said}"
+                      if said else
+                      f"no head after {fmt_age(elapsed)} - nothing in the pane")
+
+        gid = str((claims.get(label) or {}).get("group") or "")
+        rows.append({
+            # Not a session id - it has none, and will not have one until it is
+            # a head. This names the pane, which is the thing that exists, and
+            # is shaped so that nothing writes a state file about it: see
+            # safe_sid in store.py.
+            "session_id": f"starting:{pane}",
+            # The pane's own pid, so x has something real to wait on. It is the
+            # shell the pane was opened with; the claude we are waiting for is
+            # under it, and closing the pane ends both.
+            "pid": where[0],
+            "name": label,
+            "name_source": "",
+            "cwd": at.get("cwd", ""),
+            "kind": "starting",
+            "foreign": False,
+            "elsewhere": False,
+            "state": state,
+            "reason": reason,
+            "step": "",
+            "task": "",
+            "idle_for": elapsed,
+            "last_ts": at["at"],
+            "tty": None,
+            "pane_id": pane,
+            "pane": where[1],
+            "in_main": bool(main_win and where[2] == main_win),
+            "active": pane in cursor,
+            "priority": STATES[state][0],
+            "attention": state in NEEDS_ATTENTION,
+            "group": gid,
+            "group_label": group_label(book, gid) if gid else "",
+            "group_rank": group_rank(book, gid, order) if gid else len(order),
+            "held": False,
+            # What the rest of the program checks rather than reading the state
+            # column: this row is a pane, not a head, so the keys that act on a
+            # head's session id have nothing to act on.
+            "pending": True,
+            "holds": holds,
+            "spin": spin,
+        })
+
+    _starting = kept
+    return rows
+
+
+def starting(heads):
+    """The name of the head the queue is standing off for, or "".
+
+    Pure, over a list that already has the pending rows on it - the reading is
+    done in pending(), once a refresh, and this is only the question auto_raise
+    asks of the answer.
+
+    Only automatic movement waits on it. `j`, Alt+j and the go-on key are you
     asking for a head by name, and a queue that ignored you because something
     else was starting would be a worse bargain than the one this fixes.
     """
-    global _starting
-    if _starting is None:
-        return ""
-    pane, label, deadline = _starting
-    now = time.time() if now is None else now
-    if (now >= deadline
-            or any(h.get("pane_id") == pane for h in heads)
-            or pane not in panes_by_id()):
-        _starting = None
-        return ""
-    return label
+    return next((h["name"] for h in heads if h.get("holds")), "")
 
 
 def auto_raise(heads, held, dash_pane_id=""):
@@ -478,16 +658,22 @@ def spawn(cmd, cwd, label, heads):
     if not dash:
         print("no dashboard pane - run `bottleneck start`", file=sys.stderr)
         return False
-    evict_heads(dash, heads)
     # -P -F asks tmux which pane it just made. We used to not ask, and then name
     # the pane with a select-pane aimed at whatever was current - which is the
     # new one, so it worked. Asking is worth the same round-trip: the answer is
     # the only way to know where a head went when its own pid cannot tell us,
     # which is every head whose claude lives on the other side of a WSL mount.
-    pane = tmux_out("split-window", "-h", "-l", f"{HEAD_PCT}%", "-t", dash,
-                    "-c", cwd, "-P", "-F", "#{pane_id}",
-                    f"{cmd} || {{ printf '\\n[bottleneck] exited %s\\n' \"$?\"; read -r _; }}")
-    pane = pane.splitlines()[0].strip() if pane else ""
+    #
+    # In with the eviction, so the window is never briefly a dashboard on its
+    # own - see evict_moves. Nothing else in the list prints, so the pane id is
+    # the last thing to come back whatever went before it.
+    r = tmux_many(*evict_moves(dash, heads), [
+        "split-window", "-h", "-l", f"{HEAD_PCT}%", "-t", dash,
+        "-c", cwd, "-P", "-F", "#{pane_id}",
+        f"{cmd} || {{ printf '\\n[bottleneck] exited %s\\n' \"$?\"; read -r _; }}"])
+    said = (r.stdout or "").strip() if r and r.returncode == 0 else ""
+    pane = said.splitlines()[-1].strip() if said else ""
+    invalidate()
     if not pane:
         tmux_say("bottleneck: could not open the pane")
         return False
@@ -496,10 +682,12 @@ def spawn(cmd, cwd, label, heads):
     # now, in another process; the name is all we have to hang this on until the
     # first refresh that sees the head sees both.
     bind_pane(label, pane)
-    # And the queue stands off this pane until that refresh comes - see
-    # starting(). Set last, so a spawn that failed above never freezes anything.
-    global _starting
-    _starting = (pane, label, time.time() + SPINUP_SECS)
+    # And the pane gets a row of its own until that refresh comes, with the
+    # queue standing off it while it does - see pending(). Set last, so a spawn
+    # that failed above never freezes anything.
+    now = time.time()
+    _starting.append({"pane": pane, "label": label, "cwd": cwd, "at": now,
+                      "until": now + SPINUP_SECS})
     return True
 
 

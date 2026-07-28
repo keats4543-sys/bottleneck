@@ -86,9 +86,16 @@ def safe_sid(sid):
     Ids come from Claude's own files and are guids, but `bottleneck clear` takes
     one straight from the command line - and a session id is only ever a name in
     ATTN or ACKS, never a path. The hook applies the same rule.
+
+    A colon is not a path problem; it is how the dashboard names something that
+    has no session id at all. A pane we have opened and are still waiting on
+    rides the list under `starting:%12` (see pending() in panes.py), and every
+    flag file it might otherwise leave behind would be a file about a head that
+    never existed. Rejecting the shape here is what makes that structurally
+    impossible rather than a rule each caller has to remember.
     """
     sid = sid or ""
-    if not sid or "/" in sid or "\\" in sid or sid.startswith("."):
+    if not sid or "/" in sid or "\\" in sid or ":" in sid or sid.startswith("."):
         return ""
     return sid
 

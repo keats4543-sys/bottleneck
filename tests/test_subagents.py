@@ -154,10 +154,23 @@ check("nor does the stop flag its finished turn left behind",
       state_of(1, quiet=5, raw="idle", stop=True)[0], "WORKING")
 check("and it is not something you have to answer",
       m.collect()[0]["attention"], False)
+# An agent that reads and searches for a living writes nothing for minutes at a
+# time, and that is it working. The row says how long and stays out of the
+# queue; only a silence long enough to stop being explicable asks for you.
+check("agents out and quiet a while -> still working, with the age",
+      state_of(1, quiet=m.QUIET_SECS + 60),
+      ("WORKING", f"waiting on 1 subagent - quiet for {m.fmt_age(m.QUIET_SECS + 60)}"))
+check("and a long quiet turn is not something you have to answer",
+      m.collect()[0]["attention"], False)
 check("agents out but everything silent far too long -> stalled",
       state_of(1, quiet=STALL + 60)[0], "STALLED")
 check("which says what it is actually waiting on",
       "1 subagent out" in state_of(1, quiet=STALL + 60)[1], True)
+check("a head on its own, quiet a while -> working, and says how long",
+      state_of(0, quiet=m.QUIET_SECS + 60, raw="busy"),
+      ("WORKING", f"quiet for {m.fmt_age(m.QUIET_SECS + 60)}"))
+check("and only past the stall cutoff does it ask for you",
+      state_of(0, quiet=STALL + 60, raw="busy")[0], "STALLED")
 check("no agents out, turn read -> plain idle",
       state_of(0, quiet=5, unread=False)[0], "IDLE")
 check("no agents out, turn unread -> done, as it always was",

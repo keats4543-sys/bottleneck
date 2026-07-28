@@ -3,7 +3,7 @@ import os
 import time
 
 from . import config
-from .config import NEEDS_ATTENTION, STALL_SECS, STATES
+from .config import NEEDS_ATTENTION, QUIET_SECS, STALL_SECS, STATES
 from .procs import FOREIGN, local_live, session_records, tty_of
 from .store import (ack_ts, assign_slots, binds_apply, bound_pane,
                     claims_apply, group_label, group_rank, group_ids, held_at,
@@ -100,9 +100,16 @@ def collect():
         # ends its turn to wait for them, so both of those fire and both are
         # wrong: it has not finished and it wants nothing from you. It is the
         # one state where work is going on somewhere this head is not.
-        elif kids and idle_for <= STALL_SECS:
+        elif kids and idle_for <= QUIET_SECS:
             state, reason = "WORKING", (
                 f"waiting on {kids} subagent" + ("s" if kids > 1 else ""))
+        elif kids and idle_for <= STALL_SECS:
+            # Quiet, but agents that read and search for a living are quiet for
+            # minutes at a time and that is them working. Say how long, and
+            # leave it out of the queue.
+            state, reason = "WORKING", (
+                f"waiting on {kids} subagent" + ("s" if kids > 1 else "")
+                + f" - quiet for {fmt_age(idle_for)}")
         elif kids:
             # Nothing from the head and nothing from any of its agents for a
             # good while. Something is stuck, and saying so beats claiming work
@@ -119,6 +126,11 @@ def collect():
                 state, reason = "IDLE", ""
         elif idle_for > STALL_SECS:
             state, reason = "STALLED", f"quiet for {fmt_age(idle_for)}"
+        elif idle_for > QUIET_SECS:
+            # Still working as far as anyone can tell, and has been at this one
+            # step for a while - a build, a test run, a long read. Worth
+            # saying, not worth calling you over.
+            state, reason = "WORKING", f"quiet for {fmt_age(idle_for)}"
         else:
             state, reason = "WORKING", ""
 

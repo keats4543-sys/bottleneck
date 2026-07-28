@@ -603,10 +603,58 @@ still sees the list. The suite checks all of that on every run.
 | `BLOCKED` | permission prompt — burning wall clock |
 | `WAITING` | harness wants input, or an idle notification fired |
 | `DONE` | finished a turn you have not read |
-| `STALLED` | says busy, but quiet for `BOTTLENECK_STALL_SECS` (300) |
-| `working` / `idle` / `dead` | no action needed |
+| `STALLED` | says busy, but quiet for `BOTTLENECK_STALL_SECS` (1800) |
+| `starting` / `working` / `idle` / `dead` | no action needed |
 
 Within a state the longest-neglected head sorts first.
+
+### Quiet is not the same as stuck
+
+A head writes to its transcript when something happens — a message, a tool call,
+a tool result — and not otherwise. So the time since its last write is not how
+long it has been stuck, it is how long the current step is taking, and plenty of
+ordinary steps take a while: a test suite, a build, an install, an agent reading
+half a repository.
+
+Past `BOTTLENECK_QUIET_SECS` (300) the row says how long it has been at it —
+`working — quiet for 8m` — and stays out of the queue, because nothing about it
+needs you. Only past `BOTTLENECK_STALL_SECS` (1800) does the silence stop being
+explicable by a long step, and only then does the row turn `STALLED` and ask for
+you. Both are knobs; the first cutoff is a fact on the row, the second is a
+summons.
+
+### A head that has not started yet
+
+Between opening the pane and the head existing there is a gap: claude picks its
+session id in another process, and until it has written a session file there is
+nothing on disk to find. Usually a second or two — but a folder claude has not
+run in before gets **"Do you trust the files in this folder?"**, and it will sit
+on that question for as long as you take to answer it.
+
+None of that is invisible any more. The pane goes on the list from the moment it
+is opened, as `starting`, spinning, with the queue standing off the main pane
+while it comes up. If what is in it asks you something, the row becomes a
+`WAITING` that names the question — `asks: Do you trust the files in this
+folder?` — and the go-on key takes you there like any other head, wherever the
+pane has ended up. If nothing ever turns up, the row stays and repeats what the
+pane last printed, which is usually `claude: command not found` and is the
+answer you opened it to find.
+
+The row is a pane, not a head: it has no session id, so `G`, `h` and the ranking
+keys decline it and say why. Enter, the digit keys, `j` and `x` all work.
+
+### Switching without the flicker
+
+Moving a head in takes two moves — break the sitting one out, join the new one
+— and between them the dashboard is alone in the window, which is to say full
+width. tmux redraws the client at every call it is given, so that stretch was on
+screen every time you jumped, and a refresh landing in the middle of it laid the
+whole list out for a width the pane was about to lose. Every move now goes to
+tmux as one command list, so the client redraws once, with the layout it is
+going to keep. The dashboard also redraws the moment its pane changes shape
+rather than at the end of the current refresh, and a frame is written over the
+last one instead of blanking the screen first — there is no longer a moment
+between the erase and the write for anything to see.
 
 ### Heads that are waiting on agents
 
@@ -627,9 +675,11 @@ alone.
 Their work counts as its work, too. The agents write to their own transcripts
 beside the head's, and the newest of those counts as the head's last activity —
 otherwise a head that dispatched an hour of research would read as quiet five
-minutes later. If everything really does go silent, head and agents both, for
-longer than `BOTTLENECK_STALL_SECS`, the row says `STALLED — 3 subagents out,
-quiet for 12m`, which is the honest answer when something has got stuck.
+minutes later. Past `BOTTLENECK_QUIET_SECS` the row starts saying how long —
+`working — waiting on 3 subagents - quiet for 8m` — and still asks nothing of
+you. If everything really does go silent, head and agents both, for longer than
+`BOTTLENECK_STALL_SECS`, the row says `STALLED — 3 subagents out, quiet for
+40m`, which is the honest answer when something has got stuck.
 
 Only the harness's own words count, never the head's: the markers must open
 their block and arrive on a user turn. A head *writing about* agents — reading a
@@ -648,7 +698,10 @@ wins, so a one-off override still works.
 | `BOTTLENECK_DEFAULT_DIR` | the current directory | where a new head lands |
 | `BOTTLENECK_GROUP` | unset | group every head `bottleneck new` starts lands in |
 | `BOTTLENECK_HEAD_PCT` | `62` | width of the head pane |
-| `BOTTLENECK_STALL_SECS` | `300` | quiet-but-busy cutoff for `STALLED` |
+| `BOTTLENECK_QUIET_SECS` | `300` | quiet-but-busy cutoff for saying how long |
+| `BOTTLENECK_STALL_SECS` | `1800` | quiet-but-busy cutoff for `STALLED` |
+| `BOTTLENECK_SPINUP_SECS` | `30` | how long the queue waits for a head being started |
+| `BOTTLENECK_SPINUP_TICK` | `0.5` | redraw while something is starting, seconds |
 | `BOTTLENECK_CLAUDE_HOMES` | `~/.claude`, plus any found under `/mnt/c/Users/*` | colon-separated `.claude` directories to read heads from |
 | `BOTTLENECK_REFRESH` | `2` | dashboard refresh, seconds |
 | `BOTTLENECK_TASKLINE` | `all` | prompt line per row: `all`, `attention`, `off` |

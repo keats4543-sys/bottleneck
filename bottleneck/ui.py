@@ -7,16 +7,17 @@ import time
 
 from . import config
 from .config import (CTL, DANGEROUS, DEFAULT_DIR, NEEDS_ATTENTION, REFRESH,
-                     ROLE, STATES, SUB_INDENT, SUB_LINES, TASKLINE, c)
+                     ROLE, SPIN, SPINUP_TICK, STATES, SUB_INDENT, SUB_LINES,
+                     TASKLINE, c)
 from .catalog import catalog_note, random_name, session_list
 from .heads import collect, fmt_age
 from .panes import (auto_raise, claude_cmd, focus, kill_head, next_or_park,
-                    park, reaped, restart_here, send_go, spawn, starting,
+                    park, pending, reaped, restart_here, send_go, spawn,
                     warm_claude)
-from .store import (auto_enabled, by_slot, claim_group, clear_attention,
-                    group_ids, group_label, mark_seen, move_group,
-                    name_group, queue_load, queue_save, set_auto, set_group,
-                    set_hold)
+from .store import (assign_slots, auto_enabled, by_slot, claim_group,
+                    clear_attention, group_ids, group_label, mark_seen,
+                    move_group, name_group, queue_load, queue_save, set_auto,
+                    set_group, set_hold)
 from .tmuxio import (dash_pane, dash_point, dash_register, dash_release,
                      invalidate, pane_in_mode, tmux, tmux_say, write_keys_conf)
 from .transcript import clip
@@ -87,6 +88,53 @@ def wrap_task(h, width):
     return [" " * SUB_INDENT + clip("· " + task, room)]
 
 
+def paint(text):
+    """Put a frame on the screen without blanking it first.
+
+    The obvious way to redraw is home, erase everything, write the new frame -
+    and it means that between the erase and the write there is a moment where
+    the screen is empty. tmux is free to send the client whatever the pane
+    holds at any point in that, so the list flickers, and the faster it redraws
+    the more often you catch it. That is not free to leave alone now: a pane
+    coming up redraws twice a second.
+
+    So nothing is erased ahead of time. Each line is written over whatever was
+    on that row and clears the rest of the row behind itself, and one erase at
+    the end takes away the rows a shorter frame left behind. Every cell either
+    holds new content or is cleared in the same write - there is no moment in
+    between for anything to see.
+    """
+    lines = text.split("\n")
+    sys.stdout.write("\033[H" + "\033[K\n".join(lines) + "\033[K\033[J")
+    sys.stdout.flush()
+
+
+# Set by SIGWINCH, read by the wait loop. The pane changing shape is the one
+# thing that makes what is on screen wrong immediately rather than in a second
+# or two - every line is laid out for a width the pane no longer has - and it
+# is exactly what happens when a head lands beside the dashboard. Waiting out
+# the rest of the refresh leaves the list truncated or stretched in the
+# meantime, which is the shifting you see and then watch settle.
+_resized = False
+
+
+def _on_winch(sig, frame):
+    global _resized
+    _resized = True
+
+
+def spinner(now=None):
+    """Which frame the spinner is on, from the clock rather than a counter.
+
+    Nothing has to be threaded through the redraw or reset when a row appears
+    and disappears: every spinner on the screen is on the same frame, which is
+    what you would want anyway, and the loop only has to redraw often enough
+    for it to move. See SPINUP_TICK.
+    """
+    now = time.time() if now is None else now
+    return SPIN[int(now / max(0.05, SPINUP_TICK)) % len(SPIN)]
+
+
 def render(heads, width=None, note="", auto=None, selected=""):
     if width is None:
         try:
@@ -152,6 +200,14 @@ def render(heads, width=None, note="", auto=None, selected=""):
         _, label, colour = STATES[h["state"]]
         mark = c("1;93", "›") if h["attention"] else (c("1;96", "●") if h["in_main"] else " ")
         body = h["reason"] or h["step"] or ""
+        # A pane that is still coming up has nothing to report but the fact
+        # that it is still coming up, and a line that never changes reads as a
+        # dashboard that has stopped rather than as a head that has not
+        # started. The spinner is the whole of the difference. It goes on the
+        # summary rather than in the state column so that a row asking you
+        # something keeps the plain WAITING every other row wears.
+        if h.get("spin"):
+            body = f"{spinner()} {body}"
         # Tag backgrounded heads always: they have no pane and ignore /exit, so
         # without a marker they look like ordinary heads that refuse to die.
         name = h["name"]
@@ -396,6 +452,12 @@ def queue_key(key, heads, selected=""):
            or current_head(heads))
     if not cur:
         return "no head selected - bring one up first"
+    # Everything here is written down against a session id, and a pane that is
+    # still starting has none - a group or a hold filed under the pane would be
+    # about a head that does not exist, and would still be there once one did.
+    # The group asked for at launch is already claimed against the name.
+    if cur.get("pending"):
+        return f"{cur['name']} is still starting - wait for it to come up"
     sid, name = cur["session_id"], cur["name"]
 
     if key == "h":
@@ -685,6 +747,8 @@ def retract_bar():
 
 def watch():
     import select
+    import signal
+    global _resized
     # Claim this pane before anything else looks for a dashboard: the mark on
     # its own is not enough to tell us apart from a pane that used to be one.
     # The configured keys, in case tmux was started before they were set. It is
@@ -710,6 +774,16 @@ def watch():
             ttymod.setcbreak(sys.stdin.fileno())
         except Exception:
             raw = None
+
+    # Redraw when the pane changes shape rather than at the end of the refresh
+    # it happened in. A head joining the window is a resize, and every line of
+    # the list is laid out for the width it had a moment ago.
+    winch = None
+    if raw and hasattr(signal, "SIGWINCH"):
+        try:
+            winch = signal.signal(signal.SIGWINCH, _on_winch)
+        except (OSError, ValueError):
+            winch = None
 
     note = ""
     held = None
@@ -742,15 +816,17 @@ def watch():
             dash_point(me)
             heads = collect()
             catalog_note(heads)
+            # The panes we have opened that are not heads yet, on the list
+            # ahead of everything else - they are the newest thing there is,
+            # and one of them may be sat asking you whether it may read the
+            # folder you started it in. Merged after the catalogue, which is a
+            # book of heads and must not hear about panes, and before
+            # everything that reads the list, all of which should.
+            waiting_on = pending(heads)
+            if waiting_on:
+                heads = assign_slots(waiting_on + heads)
             publish_bar(heads)
             if auto_enabled():
-                # Say why nothing is moving. The wait is short and it is the
-                # dashboard doing as it was told, which is worth a line - a
-                # queue that has gone quiet on its own is the thing you would
-                # otherwise sit and wonder about.
-                coming = starting(heads)
-                if coming:
-                    note = f"queue held - {coming} is starting"
                 raised, held = auto_raise(heads, held, me)
                 if raised:
                     note = f"raised {raised['name']} - {raised['state'].lower()}"
@@ -770,17 +846,26 @@ def watch():
             if not any(h["session_id"] == picked for h in heads):
                 cur = current_head(heads)
                 picked = (cur or heads[0])["session_id"] if heads else ""
-            sys.stdout.write("\033[H\033[2J"
-                             + render(heads, note=note, auto=auto_enabled(),
-                                      selected=picked) + "\n")
+            frame = render(heads, note=note, auto=auto_enabled(),
+                           selected=picked)
             if raw:
-                sys.stdout.write("\n" + c("90", "  " + HELP) + "\n")
-            sys.stdout.flush()
+                frame += "\n\n" + c("90", "  " + HELP)
+            # Anything that arrived while the frame was being built is about
+            # the frame before it. Cleared here so the wait below only sees a
+            # resize that happened to what is now on screen.
+            _resized = False
+            paint(frame)
             note = ""
             leave_copy_mode(me)
 
-            deadline = time.time() + REFRESH
+            # Faster while something is coming up, and only then: the spinner
+            # has to move, and those are the seconds where the list is telling
+            # you about something that changes by the second. Everything else
+            # on the screen is worth REFRESH and no more.
+            deadline = time.time() + (SPINUP_TICK if waiting_on else REFRESH)
             while True:
+                if _resized:
+                    break               # the frame on screen is the wrong shape
                 left = deadline - time.time()
                 if left <= 0:
                     break
@@ -917,11 +1002,14 @@ def watch():
                     name, gid, where = answers
                     if gid:
                         claim_group(name, gid)
-                    spawn(claude_cmd(f"--name {json.dumps(name)}{DANGEROUS}"),
-                          where, name, heads)
-                    if gid:
-                        note = (f"{name} joins "
-                                f"{group_label(queue_load(), gid)} when it starts")
+                    # Say that the keys were taken, on the spot. The row
+                    # appears on the next redraw and says the rest.
+                    if spawn(claude_cmd(f"--name {json.dumps(name)}{DANGEROUS}"),
+                             where, name, heads):
+                        note = f"starting {name} in {where}"
+                        if gid:
+                            note += (f" - joins {group_label(queue_load(), gid)}"
+                                     f" when it comes up")
                     break
                 if key == "r":
                     rows = session_list(limit=12, hide_live=True)
@@ -943,9 +1031,9 @@ def watch():
                     row = rows[int(pick) - 1]
                     where = (row["cwd"] if os.path.isdir(row["cwd"] or "")
                              else DEFAULT_DIR)
-                    spawn(claude_cmd(f"--resume {row['session_id']}{DANGEROUS}"),
-                          where, row["name"], heads)
-                    note = f"resuming {row['name']}"
+                    if spawn(claude_cmd(f"--resume {row['session_id']}{DANGEROUS}"),
+                             where, row["name"], heads):
+                        note = f"resuming {row['name']}"
                     break
                 if key == "x":
                     cur = (next((h for h in heads
@@ -995,6 +1083,11 @@ def watch():
         # onto the one we are about to abandon.
         sys.stdout.write("\033[?25h\033[?1049l")
         sys.stdout.flush()
+        if winch is not None:
+            try:
+                signal.signal(signal.SIGWINCH, winch)
+            except (OSError, ValueError):
+                pass
         if raw:
             import termios
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, raw)
