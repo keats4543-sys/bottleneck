@@ -18,9 +18,23 @@ fail=0
 # between branches - so this discovers them rather than listing them, and a
 # branch that adds a module adds no line here either. PYTHONPATH is what lets
 # a module's test say `from harness import bn`.
+# Each test is run with exactly the modules it is about, and no others.
+#
+# The core's tests get none. They describe what bottleneck does, and a module
+# that happens to be checked out must not be able to change the answer: a
+# module adding a segment to the status line turned a core test red without
+# touching a line of core code, which is a test suite reporting the checkout
+# rather than the code. A module's own tests get that module, taken from the
+# path it lives at, so they never have to name themselves twice.
 for t in test_*.py ../bottleneck/modules/*/tests/test_*.py; do
     [ -f "$t" ] || continue
+    case "$t" in
+        ../bottleneck/modules/*) want="${t#../bottleneck/modules/}"
+                                 want="${want%%/*}" ;;
+        *) want="none" ;;
+    esac
     echo "--- $t"
+    BOTTLENECK_MODULES="$want" \
     PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" python3 "$t" || fail=1
 done
 
