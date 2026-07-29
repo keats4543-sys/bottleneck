@@ -368,11 +368,9 @@ disabled and named — never a dashboard that will not start, and never one that
 dies on a timer or halfway through drawing a frame. Modules may import the core;
 the core never imports a module, only the registry.
 
-This branch carries one:
-
-| Module | What it does |
-|---|---|
-| [`share`](bottleneck/modules/share/README.md) | heads in a group tell each other their goals and what files they have changed |
+No modules ship with the core. A branch that carries one carries a directory
+under `bottleneck/modules/`, and mounting that checkout installs whatever it
+asks for; mounting a checkout without it takes the wiring back out again.
 
 ## The numbers
 
@@ -653,10 +651,6 @@ bottleneck group <n> <g>  put head n in group g ("none" to clear)
 bottleneck groups       who is in what, in priority order
 bottleneck group disband <g>  take a group apart, freeing its heads
 bottleneck claim <name> <g>  group a head that has not started yet
-bottleneck share        the group boards: goals, queues, who changed what
-bottleneck goal [<n>] <s>  say what a head is for - its siblings are told
-bottleneck note <s>     put a line on this head's group board
-bottleneck share clear  forget every board (the heads keep their groups)
 bottleneck hold <n>     done, but not now - sorts below working heads
 bottleneck unhold <n>   put it back in the queue
 bottleneck kill <n>     stop a head by number, name or raw pid (needs --yes)
@@ -852,9 +846,7 @@ outside the ladder: a module may import any of the core, and no part of the core
 imports a module — only `modules/__init__.py`, which knows them by name.
 
 Each module's own knobs are documented with the module, not here - a
-`bottleneck/modules/<name>/README.md` beside the code it describes. See
-[`bottleneck/modules/share/README.md`](bottleneck/modules/share/README.md) for
-the group boards' half a dozen.
+`bottleneck/modules/<name>/README.md` beside the code it describes.
 
 ## Tests
 
