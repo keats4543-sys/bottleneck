@@ -22,6 +22,12 @@ module is a directory under here that answers some of them:
       "usage":    text appended to `bottleneck --help`
       "state":    directories under ~/.bottleneck it wants created
 
+      # what a head is launched with
+      "env":      fn(spec) -> {"NAME": "value"}   added to a new head's
+                  environment, which is where anything that has to be true
+                  before claude starts goes - a proxy to talk to, a model to
+                  use. spec is {"cwd", "label"}.
+
       # what it puts on the screen - content out
       "mark":     fn(head) -> str    a badge on that head's row
       "lines":    fn(head, width) -> [str]   lines under that head
@@ -200,6 +206,43 @@ def commands():
 def usage():
     """The help text the modules contribute, in module order."""
     return [str(mod["usage"]).rstrip() for _, mod in enabled() if mod.get("usage")]
+
+
+# --------------------------------------------------------- launching a head
+
+# A name the shell will take as a variable and not as anything else.
+_NAME_OK = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
+
+
+def environ(spec=None):
+    """{NAME: value} the modules want in a new head's environment.
+
+    The point where a feature can be true before claude starts rather than
+    after: an API proxy to talk to, a model to use, a flag the session should
+    run under. A hook cannot do any of that - it runs when claude is already
+    up, and never sees the request.
+
+    First module wins a name, and every value is a string. Names are checked
+    rather than trusted: these end up in front of a command, and a name with a
+    space or a semicolon in it would be a module able to run anything it liked
+    on the machine.
+    """
+    spec = spec or {}
+    out = {}
+    for name, fn in providers("env"):
+        try:
+            got = fn(spec) or {}
+            if not isinstance(got, dict):
+                raise TypeError("env must be a dict")
+        except Exception as exc:                      # noqa: BLE001
+            _put_down(name, exc, "the environment for a head")
+            continue
+        for key, val in got.items():
+            key = str(key)
+            if not key or set(key) - _NAME_OK or key[0].isdigit():
+                continue
+            out.setdefault(key, _clean(val, 4096))
+    return out
 
 
 # ------------------------------------------------------- content, on the screen

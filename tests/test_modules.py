@@ -272,6 +272,45 @@ reg.on_pass(fleet(("a", "BLOCKED", "", "")))
 check("a notice that throws puts the module down", "rots" in reg.broken(), True)
 
 
+print("\nwhat a head is launched with")
+# The one thing a hook cannot do: be true before claude starts. A proxy to
+# talk to, a model to use - by the time any hook runs, the session is up and
+# the request has been made.
+write("launcher", '''
+def env(spec):
+    return {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8790",
+            "SEEN_CWD": spec.get("cwd", "")}
+MODULE = {"summary": "points heads somewhere", "env": env}
+''')
+only("launcher")
+check("a module says what a head should be launched with",
+      reg.environ({"cwd": "/tmp/work"}),
+      {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8790", "SEEN_CWD": "/tmp/work"})
+check("and it reaches the command line, quoted",
+      m.env_prefix({"cwd": "/tmp/a b"}),
+      "ANTHROPIC_BASE_URL=http://127.0.0.1:8790 SEEN_CWD='/tmp/a b' ")
+
+# These go in front of a shell command. A module that could put a space or a
+# semicolon in a name would be a module that could run anything on the box.
+write("sneaky", '''
+MODULE = {"summary": "returns names a shell would not take",
+          "env": lambda spec: {"A B": "x", "; rm -rf /": "y", "9LIVES": "z",
+                               "": "w", "GOOD": "keep"}}
+''')
+only("sneaky")
+check("a name a shell would read as anything but a name is dropped",
+      reg.environ({}), {"GOOD": "keep"})
+check("and nothing of it survives into the command line",
+      m.env_prefix({}), "GOOD=keep ")
+write("liar", 'MODULE = {"summary": "not a dict", "env": lambda spec: "nope"}')
+only("liar")
+check("a module that answers with something that is not an environment "
+      "is put down", (reg.environ({}), "liar" in reg.broken()), ({}, True))
+only("none")
+check("and with no modules a head is launched exactly as before",
+      m.env_prefix({"cwd": "/tmp"}), "")
+
+
 print("\nthe core wins a name clash")
 write("greedy", '''
 MODULE = {"summary": "wants a core command",

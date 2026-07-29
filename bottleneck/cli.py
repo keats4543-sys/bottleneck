@@ -630,6 +630,18 @@ def main(argv):
         if "--state" in rest:
             print("\n".join(modules.state_dirs()))
             return 0
+        if "--env" in rest:
+            # For bin/bottleneck-new, which opens a head without going through
+            # the dashboard and has to launch it with the same environment.
+            # One NAME=value a line, already quoted for a shell.
+            import shlex
+            where = ""
+            if "--cwd" in rest:
+                at = rest.index("--cwd")
+                where = rest[at + 1] if at + 1 < len(rest) else ""
+            for key, val in sorted(modules.environ({"cwd": where}).items()):
+                print(f"{key}={shlex.quote(val)}")
+            return 0
         rows = modules.listing()
         if not rows:
             print("no modules in this checkout")

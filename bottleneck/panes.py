@@ -22,6 +22,8 @@ from .tmuxio import (dash_pane, invalidate, pane_is_active, pane_session,
                      panes_in_window, tmux, tmux_many, tmux_out, tmux_say,
                      write_keys_conf)
 from .transcript import clip
+# Outside the ladder - see bottleneck/modules/__init__.py.
+from . import modules
 
 
 # -------------------------------------------------------------- pane placement
@@ -642,6 +644,17 @@ def claude_cmd(args):
     return f"{_LAUNCH} {args}" if _LAUNCH else ""
 
 
+def env_prefix(spec):
+    """`NAME=value ` for each thing the modules want in a head's environment.
+
+    Shell-quoted, because a value is a path or a URL and one day will be
+    something with a space in it. Empty when no module asked for anything,
+    which is the ordinary case and costs the command line nothing.
+    """
+    got = modules.environ(spec)
+    return "".join(f"{k}={shlex.quote(v)} " for k, v in sorted(got.items()))
+
+
 def spawn(cmd, cwd, label, heads):
     """Open a brand-new pane beside the dashboard running `cmd`.
 
@@ -654,6 +667,12 @@ def spawn(cmd, cwd, label, heads):
         tmux_say("bottleneck: cannot find claude - set BOTTLENECK_CLAUDE "
                  "in ~/.bottleneck/config to its full path")
         return False
+    # Whatever the modules want true before claude starts. In front of the
+    # command rather than exported here: tmux runs this through a shell, and a
+    # variable set on that line belongs to the head and to nothing else on the
+    # box - not to the dashboard, and not to the next head, which may be
+    # launched by a checkout carrying different modules.
+    cmd = env_prefix({"cwd": cwd, "label": label}) + cmd
     dash = dash_pane()
     if not dash:
         print("no dashboard pane - run `bottleneck start`", file=sys.stderr)

@@ -201,10 +201,21 @@ if ! tmux has-session -t "$BN_SESSION" 2>/dev/null; then
     tmux new-session -d -s "$BN_SESSION" -n dash -c "$PWD" "exec bottleneck watch"
 fi
 
+# Whatever the modules in this checkout want a head launched with - the same
+# question the dashboard asks itself before it opens a pane, asked here because
+# this opens one without going through it. Already shell-quoted, one a line,
+# and empty for a checkout carrying no modules that want anything.
+mod_env=""
+while IFS= read -r line; do
+    [ -n "$line" ] && mod_env="$mod_env$line "
+done <<EOF
+$(bottleneck modules --env --cwd "$dir" 2>/dev/null || true)
+EOF
+
 # Hold the window open if claude bails, so the error is readable instead of the
 # window silently vanishing (tmux closes a window when its command exits).
 tmux new-window -t "$BN_SESSION" -n "$safe_name" -c "$dir" \
-    "$cmd $extra || { printf '\n[bottleneck new] claude exited %s in %s\n' \"\$?\" $(shq "$dir"); read -r _; }"
+    "$mod_env$cmd $extra || { printf '\n[bottleneck new] claude exited %s in %s\n' \"\$?\" $(shq "$dir"); read -r _; }"
 
 if [ -n "${BOTTLENECK_NO_ATTACH:-}" ]; then
     echo "opened '$name' in $BN_SESSION ($mode, $dir)"
