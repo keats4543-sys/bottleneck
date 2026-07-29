@@ -200,16 +200,28 @@ mount)
 
     # And the ones that are no longer wanted: a module turned off, or gone from
     # the branch since the last mount, leaves a hook file behind that nothing
-    # refers to any more. Only symlinks into this checkout are touched, and
-    # never the core's own.
+    # refers to any more.
+    #
+    # Whichever checkout it points into. That used to be limited to symlinks
+    # into this one, and the case it got wrong is now the ordinary one: with a
+    # branch checked out in its own worktree, mounting the core over a mounted
+    # module left ~/.claude/hooks/bottleneck-share.py pointing into the
+    # worktree. Harmless - the settings sweep above takes its wiring out either
+    # way, so nothing runs it - but a link nothing wants, sat where a hook goes,
+    # and it accumulates one per branch you try.
+    #
+    # Two things keep that safe. Only ever a symlink: a real file there is
+    # somebody's own hook and none of our business. And only in the
+    # bottleneck-*.py namespace, which is ours to keep tidy - the same names
+    # the settings sweep above already claims, for the same reason.
     WANTED_NAMES="$(printf '%s' "$MODULES_JSON" | python3 -c 'import json,sys; print(" ".join(m["name"] for m in json.load(sys.stdin) or []))' 2>/dev/null || true)"
     for p in "$HOME"/.claude/hooks/bottleneck-*.py; do
         [ -L "$p" ] || continue
         n="$(basename "$p" .py)"; n="${n#bottleneck-}"
         [ "$n" = "attention" ] && continue
         case " $WANTED_NAMES " in *" $n "*) continue ;; esac
-        target="$(readlink -f "$p" 2>/dev/null || true)"
-        case "$target" in "$REPO"/*) rm -f "$p"; echo "module: $n unwired" ;; esac
+        rm -f "$p"
+        echo "module: $n unwired"
     done
 
     case ":$PATH:" in
