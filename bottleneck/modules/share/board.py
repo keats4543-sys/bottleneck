@@ -796,12 +796,23 @@ def line_of(msg, cwd="", now=None):
     return f"  {when:<9} {who} {body}"
 
 
-def brief(sid, cwd="", now=None, extra=""):
+def brief(sid, cwd="", now=None, extra="", standing=True):
     """The whole injection: who else is here, and what they have done.
 
     One block, tagged, so a head can tell at a glance that this is bottleneck
     talking and not you. Empty when there is nothing to say - a group of one
     with a quiet board costs the context window nothing at all.
+
+    `standing` is the difference between an introduction and an update. An
+    introduction says who is here and how this works, and is what a head wants
+    when it starts or comes back from a compaction knowing none of it. An
+    update is only what has happened since it was last told.
+
+    They were the same thing, and the standing half was going into every turn:
+    measured at 328 identical characters a turn for a group of three, ~66k over
+    a 200-turn session, re-read by the model every time. The roster is not lost
+    by leaving it out either - joining, leaving and saying what you are for are
+    all news, so a head that was told once has been kept up to date since.
     """
     sid = safe_sid(sid)
     if not sid or not ENABLED:
@@ -817,11 +828,13 @@ def brief(sid, cwd="", now=None, extra=""):
     msgs, missed = flush(sid, now)
     if not others and not msgs and not extra:
         return ""
+    if not standing and not msgs and not extra:
+        return ""                       # nothing has happened; say nothing
 
     out = [f"<bottleneck-group name=\"{group_name(gid)}\">"]
     if extra:
         out.append(extra)
-    if others:
+    if standing and others:
         out.append(f"{len(others)} other head shares this group:" if
                    len(others) == 1 else
                    f"{len(others)} other heads share this group:")
@@ -831,7 +844,7 @@ def brief(sid, cwd="", now=None, extra=""):
             out.append(f"  {peer.get('name') or peer['session_id'][:8]}"
                        f"  in {'this same directory' if where == '.' else where}"
                        f"  - {goal}")
-    else:
+    elif standing:
         out.append("no other head is in this group right now.")
     if msgs:
         out.append(f"{len(msgs)} thing{'' if len(msgs) == 1 else 's'} happened "
@@ -842,7 +855,9 @@ def brief(sid, cwd="", now=None, extra=""):
         if any(m.get("kind") in ("wrote", "edited", "deleted") for m in msgs):
             out.append("Re-read any of those files before you edit them - what "
                        "you have in context is from before the change.")
-    out.append("These heads share your working tree. Say what you are doing "
-               "with `bottleneck note`, and keep off files another head is in.")
+    if standing:
+        out.append("These heads share your working tree. Say what you are "
+                   "doing with `bottleneck note`, and keep off files another "
+                   "head is in.")
     out.append("</bottleneck-group>")
     return "\n".join(out)

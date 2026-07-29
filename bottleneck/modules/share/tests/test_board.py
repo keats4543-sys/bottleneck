@@ -271,5 +271,33 @@ check("an ended head is off the board",
       "two" in json.load(open(os.path.join(HOOK_STATE, "share", "board.json")))["who"],
       False)
 
+print("\nan introduction is said once; a turn only carries what is new")
+# The standing half - who is here, and the line about keeping off each other's
+# files - was going into every turn whether or not anything had happened: 328
+# identical characters a turn for a group of three, re-read by the model each
+# time. A head that has been told once is kept up to date by the news itself,
+# because joining, leaving and saying what you are for are all news.
+fresh(("alpha", "1"), ("beta", "1"))
+b.register("alpha", CWD, now=T)
+b.register("beta", CWD, now=T)
+b.set_goal("beta", "the lexer", now=T)
+
+intro = b.brief("alpha", CWD, now=T)
+has("an introduction says who is here", intro, "1 other head shares this group")
+has("and how this works", intro, "keep off files another head is in")
+has("and what has happened", intro, "is here to: the lexer")
+
+b.note_touch("beta", CWD + "/lexer.py", "wrote", CWD, now=T)
+update = b.brief("alpha", CWD, now=T, standing=False)
+has("an update carries the news", update, "wrote lexer.py")
+has("and the warning that goes with a file change", update, "Re-read any")
+check("and not the roster again", "shares this group" in update, False)
+check("nor the standing advice", "keep off files" in update, False)
+
+check("a quiet turn costs the context window nothing at all",
+      b.brief("alpha", CWD, now=T, standing=False), "")
+check("while the same turn as an introduction still says who is here",
+      "1 other head shares this group" in b.brief("alpha", CWD, now=T), True)
+
 print("\nall pass" if not FAILED else f"\n{len(FAILED)} FAILED")
 raise SystemExit(1 if FAILED else 0)

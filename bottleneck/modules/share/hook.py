@@ -97,7 +97,9 @@ def main():
         # the head and once to bottleneck - is how a feature stops being used.
         if prompt and not board.goal_of(sid):
             board.set_goal(sid, prompt, cwd)
-        emit(hook, board.brief(sid, cwd))
+        # An update, not an introduction: this head was introduced when it
+        # started, and everything since has reached it as news.
+        emit(hook, board.brief(sid, cwd, standing=False))
         return
 
     if hook == "SessionStart":
@@ -123,7 +125,8 @@ def main():
         if board.GUARD == "ask":
             emit(hook, decision="ask", reason=head)
             return
-        emit(hook, board.brief(sid, cwd, extra=head) or head)
+        emit(hook, board.brief(sid, cwd, extra=head,
+                               standing=False) or head)
         return
 
     if hook != "PostToolUse":

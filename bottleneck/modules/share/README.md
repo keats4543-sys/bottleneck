@@ -34,6 +34,15 @@ to say it twice is how a feature stops being used. `bottleneck goal <n> <what
 it is for>` overrides it. Siblings are told, and every one that joins later is
 told too.
 
+**A turn only carries what is new.** The block above is an *introduction*, and
+a head gets one when it starts or comes back from a compaction — who is here,
+what they are for, and how this works. Every turn after that carries only what
+has happened since the last one, and a turn where nothing happened injects
+nothing at all. Leaving the standing half in was costing 328 identical
+characters a turn for a group of three, about 66k over a 200-turn session, and
+buying nothing: joining, leaving and saying what you are for are all news, so a
+head that was introduced once has been kept current ever since.
+
 **The queue is bounded and per reader.** A group's board keeps the last
 `BOTTLENECK_SHARE_MAX` messages — twelve by default — and drops the oldest, so
 the injection has a ceiling you can reason about. Reading it is not emptying it:
