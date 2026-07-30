@@ -48,7 +48,31 @@ def env(spec):
     return {"ANTHROPIC_BASE_URL": wrap.base_url()}
 
 
+# Two caches, two lifetimes, both for the same reason: every one of these is
+# asked on every redraw of the dashboard, and none of the answers changes at
+# anything like that rate. Probing a port costs 3.7ms of round trip per frame
+# uncached - small, but it is the core's loop being spent on a module's
+# question, which is exactly what a module is not entitled to do.
+_UP = [0.0, False]
 _GAP = [0.0, []]
+
+
+def forget():
+    """Drop both caches. For tests, and for a dashboard reloading itself."""
+    _UP[0] = _GAP[0] = 0.0
+
+
+def up():
+    """Is the wrapper answering. Cached for a couple of seconds.
+
+    Short, because this is what decides whether a head about to open gets the
+    rewrite, and being two seconds out of date there costs one head its stages.
+    """
+    now = time.time()
+    if now >= _UP[0]:
+        _UP[1] = wrap.up()
+        _UP[0] = now + 2
+    return _UP[1]
 
 
 def gap():
@@ -70,7 +94,7 @@ def gap():
 
 
 def status(heads):
-    if not wrap.up():
+    if not up():
         return ""
     # The whole point of the mark: a rewrite that stopped matching looks exactly
     # like one that is working, right up until you read the prompt.

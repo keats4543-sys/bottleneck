@@ -67,7 +67,10 @@ def serving(port):
 port = free_port()
 wrap.PORT = port
 
+from bottleneck.modules import kernel as k
+
 print("\ndown, and not coming up")
+k.forget()
 check("nothing is listening", wrap.up(), False)
 check("so a head is launched with nothing rather than not launched",
       reg.environ({"cwd": "/tmp"}), {})
@@ -78,6 +81,7 @@ check("and the status line does not claim it is up", reg.status([]), [])
 print("\nup")
 srv = serving(port)
 try:
+    k.forget()                          # the 2s probe cache, not under test
     check("the probe finds it", wrap.up(), True)
     check("a head is pointed at it",
           reg.environ({"cwd": "/tmp"}),
@@ -90,20 +94,20 @@ try:
     print("\nand says when a stage cannot do its job")
     # The mark is a file because the rewrite happens in the wrapper's process
     # and the status line is drawn in the dashboard's.
-    from bottleneck.modules import kernel as k
     wrap.mark_gap(["identity: a sentence matched nothing"])
-    k._GAP[0] = 0                       # the 30s cache, not what is under test
+    k.forget()                          # the caches, not what is under test
     check("the status line marks it rather than reading as fine",
           reg.status([]), ["kernel!"])
     check("and the reason is available in words",
           k.gap(), ["identity: a sentence matched nothing"])
     wrap.mark_gap([])
-    k._GAP[0] = 0
+    k.forget()
     check("cleared once a later request is judged clean",
           reg.status([]), ["kernel"])
 finally:
     srv.shutdown()
 
+k.forget()
 check("once it goes away, a head goes straight to the API again",
       (wrap.up(), reg.environ({})), (False, {}))
 
