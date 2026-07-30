@@ -1,4 +1,10 @@
-"""Pointing a head at the proxy, without the proxy being installed.
+"""Pointing a head at the external proxy, without the proxy being installed.
+
+The module has two backends and this file is about one of them: the external
+cc-kernel-proxy checkout. So it pins the backend rather than letting the module
+choose, because the choice is exactly what the other test covers - and an
+"external checkout missing" case that quietly fell back to the built-in wrapper
+would be testing the fallback while claiming to test the absence.
 
 The module's whole job is one answer: what should this head be launched with.
 So these fake the proxy - a checkout that is only a config file, and a tiny
@@ -19,7 +25,12 @@ from harness import bn as m                  # the core: env_prefix
 from bottleneck import modules as reg
 from bottleneck.modules.kernel import proxy as p
 
+os.environ["BOTTLENECK_KERNEL_BACKEND"] = "proxy"
+
 TMP = tempfile.mkdtemp(prefix="bottleneck-kernel-")
+# Nothing here may start a real service. See wrap.AUTOSTART.
+os.environ["BOTTLENECK_KERNEL_AUTOSTART"] = "0"
+
 FAILED = []
 
 
@@ -53,7 +64,7 @@ def serving(port):
     return srv
 
 
-print("\na checkout that is not there is a module that does nothing")
+print("\na checkout that is not there is a backend that does nothing")
 p.ROOT = os.path.join(TMP, "nowhere")
 p.PRESENT = False
 check("no environment for a head", reg.environ({"cwd": "/tmp"}), {})
@@ -109,6 +120,22 @@ finally:
 
 check("once it goes away, a head goes straight to the API again",
       (p.up(), reg.environ({})), (False, {}))
+
+print("\nand with no checkout, the module falls back to the one it carries")
+# The whole point of shipping a wrapper in the module: a machine with no
+# external proxy still gets the rewrite, from wrap.py, with nothing to install.
+p.PRESENT = False
+os.environ.pop("BOTTLENECK_KERNEL_BACKEND", None)
+reg.forget()
+from bottleneck.modules import kernel as k
+check("the backend chooses itself", k.backend(), "builtin")
+check("and it is the wrapper in this directory",
+      k.chosen().__name__.endswith("wrap"), True)
+os.environ["BOTTLENECK_KERNEL_BACKEND"] = "proxy"
+reg.forget()
+check("naming the external one explicitly still overrides that",
+      k.backend(), "proxy")
+os.environ.pop("BOTTLENECK_KERNEL_BACKEND", None)
 
 print("\nall pass" if not FAILED else f"\n{len(FAILED)} FAILED")
 raise SystemExit(1 if FAILED else 0)
