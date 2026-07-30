@@ -1,15 +1,13 @@
-"""`bottleneck kernel` - which backend is up, what it runs, what it cost.
+"""`bottleneck kernel` - is it up, what does it run, what has it cost.
 
 Nothing in here knows what a stage does. It asks the registry which are running
 and prints what each one reports and explains about itself, so a stage you write
 is as visible as the ones shipped - which is the difference between an interface
 and a list of special cases.
 """
-import copy
 import json
 import os
 
-from . import proxy
 from . import stages
 from . import wrap
 
@@ -104,16 +102,14 @@ def show_prompt():
             holes.append(line)
     for line in holes:
         print(f"\n  FAILING: {line}")
-    if any("config.toml" in line for line in holes):
-        print(proxy.stanza())
     return 1 if holes else 0
 
 
 def show_stages():
     """Every stage on disk: what runs, in what order, and what does not."""
     print(f"  {stages.CONFIG}")
-    print(f"  BOTTLENECK_KERNEL_STAGES overrides it for one process "
-          f"('none' runs the wrapper as a plain hop)\n")
+    print("  BOTTLENECK_KERNEL_STAGES overrides it for one process "
+          "('none' runs the wrapper as a plain hop)\n")
     for name, writes, summary, trouble in stages.listing():
         flag = "  " if trouble is None else "!!"
         print(f"  {flag} {name:<10} {writes:<7} {summary}")
@@ -123,18 +119,15 @@ def show_stages():
 
 
 def live_gap():
-    """What the running backend is failing on, as opposed to the sample."""
-    from . import chosen
+    """What the running wrapper is failing on, as opposed to the sample."""
     try:
-        return list(chosen().gap())
+        return list(wrap.gap())
     except Exception:                   # noqa: BLE001
         return []
 
 
 def kernel_cmd(cmd, rest):
-    from . import backend, chosen
     what = (rest[0] if rest else "").strip().lower()
-    which, who = backend(), chosen()
 
     if what == "show":
         return show_prompt()
@@ -143,18 +136,15 @@ def kernel_cmd(cmd, rest):
         return show_stages()
 
     if what == "start":
-        if who.up():
-            print(f"already up on {who.base_url()} ({which})")
+        if wrap.up():
+            print(f"already up on {wrap.base_url()}")
             return 0
-        print(f"starting the {which} backend ...")
-        if who.start(wait=10):
-            print(f"up on {who.base_url()}")
+        print("starting ...")
+        if wrap.start(wait=10):
+            print(f"up on {wrap.base_url()}")
             return 0
         print("did not come up")
-        if which == "proxy":
-            print(f"  see {proxy.ROOT}/log/proxy.log")
-        else:
-            print(f"  see {os.path.dirname(wrap.LOG)}/wrap.log")
+        print(f"  see {os.path.dirname(wrap.LOG)}/wrap.log")
         return 1
 
     if what and what != "status":
@@ -162,21 +152,12 @@ def kernel_cmd(cmd, rest):
         print("  status | start | show | stages")
         return 2
 
-    live = who.up()
-    print(f"{'up  ' if live else 'down'} {who.base_url()}   backend: {which}")
-    if which == "proxy":
-        print(f"     {proxy.ROOT}")
-        chars = proxy.kernel_chars()
-        log = os.path.join(proxy.ROOT, "log", "usage.jsonl")
-        if chars:
-            print(f"     identity kernel: {chars} chars, replacing the stock "
-                  f"block")
-    else:
-        print(f"     {os.path.dirname(os.path.abspath(wrap.__file__))} "
-              f"(in this module, standard library only)")
-        running = ", ".join(n for n, _ in stages.enabled()) or "none"
-        print(f"     stages: {running}")
-        log = wrap.LOG
+    live = wrap.up()
+    print(f"{'up  ' if live else 'down'} {wrap.base_url()}")
+    print(f"     {os.path.dirname(os.path.abspath(wrap.__file__))} "
+          f"(standard library only, in this checkout)")
+    print(f"     stages: {', '.join(n for n, _ in stages.enabled()) or 'none'}")
+
     holes = live_gap()
     if holes:
         print()
@@ -192,7 +173,7 @@ def kernel_cmd(cmd, rest):
         print("     `bottleneck kernel start` brings it up")
         return 1 if holes else 0
 
-    rows = usage_rows(log)
+    rows = usage_rows(wrap.LOG)
     good = [r for r in rows if r.get("status") == 200]
     if not rows:
         print("     nothing metered yet")
@@ -201,9 +182,12 @@ def kernel_cmd(cmd, rest):
     back = sum(r.get("output_tokens") or 0 for r in rows)
     made = sum(r.get("cache_creation_input_tokens") or 0 for r in rows)
     read = sum(r.get("cache_read_input_tokens") or 0 for r in rows)
+    saved = sum(r.get("truncate.chars_saved") or 0 for r in rows)
     print(f"     last {len(rows)} requests ({len(good)} ok): {sent:,} in, "
           f"{back:,} out")
     print(f"     cache: {made:,} written, {read:,} read")
+    if saved:
+        print(f"     truncate: {saved:,} chars of tool output not resent")
     bad = [r for r in rows if r.get("status") and r["status"] >= 400]
     if bad:
         last = bad[-1]

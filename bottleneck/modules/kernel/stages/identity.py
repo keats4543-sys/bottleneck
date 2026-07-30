@@ -180,6 +180,15 @@ def apply(system, ctx):
     missed = [row["name"] for row in identity() if row["name"] not in hit]
     if not identity():
         missed = [f"no excisions loaded - {IDENTITY_FILE}"]
+    # Belt and braces, and they catch different things. A pattern that matched
+    # says the excision fired; a witness still present afterwards says it did
+    # not do the job - which is what a *partially* reworded sentence looks like,
+    # where the regex still matches some of it and leaves the rest behind.
+    left = "\n".join(b.get("text") or "" for b in got
+                     if isinstance(b, dict) and b.get("type") == "text")
+    missed += [f"{row['name']} (survived the rewrite)" for row in identity()
+               if row.get("witness") and row["witness"] in left
+               and row["name"] not in missed]
     report = {"judged": True, "chars": system_chars(got),
               "excised": sorted(hit)}
     if missed:

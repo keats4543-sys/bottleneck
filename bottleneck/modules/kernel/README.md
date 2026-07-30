@@ -5,51 +5,46 @@ by the time any hook runs, the request has been made and the stock identity
 block is already in it. Changing the request only happens at the HTTP boundary,
 which means a process between claude and the API.
 
-Two parts, and they are worth keeping apart: a **backend** is the hop, and a
-**stage** is something done to the request while it is there. The backend knows
-nothing about identities or memory; the stages know nothing about HTTP.
+Two parts, and they are worth keeping apart: **the hop** knows how to be an HTTP
+proxy and nothing else, and a **stage** is something done to the request while
+it is there. The hop knows nothing about identities or memory; the stages know
+nothing about HTTP.
 
-There are two backends here, and which is right depends on how far you have
-taken it.
-
-**`builtin`** — [`wrap.py`](wrap.py), in this directory. Standard library only,
-nothing to install. It forwards the request, runs whatever stages are configured,
-streams the answer back and meters the tokens. This is what makes the module a
-demonstration of the idea rather than a pointer at somebody else's program.
-
-**`proxy`** — an external [cc-kernel-proxy](../../../../cc-kernel-proxy)
-checkout. Same job, done in aiohttp with its own config and test suite.
-
-`BOTTLENECK_KERNEL_BACKEND` picks one, and **the default is the built-in.** It
-was the other way round while the wrapper was a demonstration, which is exactly
-the position worth not being in: heads depending every day on a checkout that
-is not version controlled here, cannot be reviewed here, and keeps its own copy
-of the rules this module is held to. Both of the external proxy's passes —
-identity replacement and deterministic `tool_result` truncation — are stages
-here now, so nothing is lost by not having it.
+The hop is [`wrap.py`](wrap.py) — standard library only, nothing to install. It
+forwards the request with the headers it came with, runs whatever stages are
+configured, streams the answer back and meters the tokens.
 
 ```
 bottleneck  ──spawns──▶  head (ANTHROPIC_BASE_URL=127.0.0.1:8790)
                               │
-                              └──▶ cc-kernel-proxy ──▶ api.anthropic.com
+                              └──▶ wrap.py ──stages──▶ api.anthropic.com
 ```
 
 It answers one question the core asks before it opens a pane — what should this
-head be launched with — and the answer is the proxy's address, with the proxy
-started if it was not already up. `claude` honours `ANTHROPIC_BASE_URL`
-natively, so nothing is patched and nothing is wrapped.
+head be launched with — and the answer is the wrapper's address, started if it
+was not already up. `claude` honours `ANTHROPIC_BASE_URL` natively, so nothing
+is patched and nothing is wrapped.
+
+> **On the proxy that used to be here.** This module had a second backend: an
+> external `cc-kernel-proxy` checkout, preferred when present. It is retired.
+> Heads were depending every day on a program that was not in this repository,
+> not version controlled anywhere, and keeping its own copy of the rules this
+> module is held to — so a reword had to be applied twice and a check existed
+> purely to notice when it had not been. Both of its passes are stages here now
+> (`identity`, `truncate`), and the wrapper took its port so a head already
+> running survived the swap.
 
 ## What it plugs into
 
 | point | what it does |
 |---|---|
-| `env` | `ANTHROPIC_BASE_URL`, and the backend started if it was down |
+| `env` | `ANTHROPIC_BASE_URL`, and the wrapper started if it was down |
 | `status` | `kernel` on the tmux status line while it is up, `kernel!` when a stage says it could not do its job |
 | `commands` | `bottleneck kernel` — what is running, and what it has cost |
 
 ## Stages — what actually happens to a request
 
-Neither backend decides what a rewrite *is*. A **stage** is one thing done to a
+The hop does not decide what a rewrite *is*. A **stage** is one thing done to a
 request on its way past, and [`stages.json`](stages.json) says which run and in
 what order. The identity rewrite is `stages/identity.py`, listed there like
 anything else — **delete the line and it stops happening.** That is the whole
@@ -141,7 +136,7 @@ version each was last confirmed against, and **a miss is made loud three ways**
 | where | what you see |
 |---|---|
 | status line | `kernel!` instead of `kernel` |
-| `bottleneck kernel` | the excision named, and a non-zero exit |
+| `bottleneck kernel` | the stage named, and a non-zero exit |
 | usage log | `stage_gaps` on the row for that request |
 
 A miss is only counted against a system prompt big enough to be a real one —
@@ -151,13 +146,11 @@ looked says so (`judged`); one that had nothing to judge leaves the mark alone
 rather than reporting all-clear, so a probe cannot wipe a real failure off the
 status line.
 
-The external proxy is a separate program with its own config, so its copy
-cannot be deleted — it is *checked* instead. `proxy.gap()` compares
-`config.toml`'s patterns against `identity.json` and reports drift in either
-direction, and reads the proxy's own debug dump of the body it last sent: a
-stock sentence still in there after a rewrite is a live failure whatever the
-config claims. `bottleneck kernel show` prints the stanza to paste when they
-have parted company.
+Two checks, because they catch different things. A pattern that matched says
+the excision fired. A **witness** — a plain substring of what it removes —
+still present *after* the rewrite says it did not do the job, which is what a
+partly reworded sentence looks like: the regex still matches some of it and
+leaves the rest behind, so counting matches alone reads as fine.
 
 ## Commands
 
@@ -172,16 +165,13 @@ bottleneck kernel stages what can run, what does run, and in what order
 
 | | |
 |---|---|
-| `BOTTLENECK_KERNEL_BACKEND` | `builtin` or `proxy`; default prefers the checkout |
-| `BOTTLENECK_KERNEL_ROOT` | the proxy checkout (default `~/cc-kernel-proxy`) |
-| `BOTTLENECK_KERNEL_PORT` | the builtin wrapper's port (default 8791) |
+| `BOTTLENECK_KERNEL_PORT` | the wrapper's port (default 8790) |
 | `BOTTLENECK_KERNEL_FILE` | the identity text it injects — otherwise `~/.bottleneck/kernel/kernel.md` if you have one, else the demo in this directory |
 | `BOTTLENECK_KERNEL_IDENTITY` | the sentences it excises (default `identity.json`) |
 | `BOTTLENECK_KERNEL_STAGES` | which stages run, in order; `none` for a plain hop |
 | `BOTTLENECK_KERNEL_STAGES_DIR` | where to look for stages before looking here |
 | `BOTTLENECK_KERNEL_MEMORY` | the file the memory stage recalls |
 | `BOTTLENECK_KERNEL_AUTOSTART` | `0` to never start it, only use it if it is up |
-| `BOTTLENECK_KERNEL_WAIT` | seconds to wait for a starting proxy (default 3) |
 
 ## What it will not do
 
@@ -196,10 +186,11 @@ through the real rewrite against claude's real opening blocks — so the claim
 that the identity is replaced rather than argued with is checkable rather than
 asserted.
 
-**It starts the backend at the head, not at the dashboard.** That is the moment
+**It starts the wrapper at the head, not at the dashboard.** That is the moment
 it is actually needed, it is the same check the proxy's own launcher makes, and
 a dashboard left up all day should not be holding a proxy open for heads you
 are not opening.
 
-**The proxy stays its own checkout.** Its kernels, its passes and its config
-are not this module's business — see its own README.
+**Your kernel stays yours.** `~/.bottleneck/kernel/kernel.md` wins over the
+`kernel.md` in this directory, which stays a demonstration. Nothing writes what
+you want a session to be into this repository.

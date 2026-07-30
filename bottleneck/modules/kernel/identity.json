@@ -3,9 +3,7 @@
     "The sentences that make claude claude, and the one place they are written.",
     "",
     "Excising these is what makes room for a different identity instead of a",
-    "second one arguing with the first. Both backends read this file - the",
-    "built-in wrapper at import, and the external cc-kernel-proxy by way of the",
-    "config check in proxy.py - so a reword is edited here once.",
+    "second one arguing with the first.",
     "",
     "min_system_chars is the line between a prompt worth judging and one that is",
     "not, and it is measured rather than guessed. Claude Code's agent prompt was",
@@ -26,8 +24,10 @@
     "and quietly carries two identities.",
     "",
     "pattern  the regex excised from every system text block",
-    "witness  a plain substring of what it removes, used to check a rewrite from",
-    "         the outside - if this survives a rewrite, the excision failed",
+    "witness  a plain substring of what it removes. Checked after the rewrite:",
+    "         still present means the excision did not do its job, which is what",
+    "         a partly reworded sentence looks like - the pattern matches some of",
+    "         it and leaves the rest behind, so counting matches alone says fine",
     "matched  the Claude Code version the pattern was last confirmed against"
   ],
   "excise": [

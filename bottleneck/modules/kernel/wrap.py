@@ -1,9 +1,9 @@
 """wrap.py - the claude call, wrapped, with the rewriting left to stages.
 
-A demonstration that this class of feature belongs to a module rather than to a
-separate program: standard library only, no venv and no dependency. It exists to
-prove the shape works, not to replace a proxy that does the job properly - see
-the module README for which to run.
+The hop every head talks to, and the whole of it: standard library only, no
+venv and no dependency. It began as a demonstration that this class of feature
+belongs in a module rather than in a separate program, and it is the only one
+now - the external proxy it stood beside is retired.
 
 What it is: an HTTP proxy on loopback that claude talks to because
 ANTHROPIC_BASE_URL says so. Everything it receives it forwards to the real API
@@ -40,7 +40,10 @@ from . import stages
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 UPSTREAM = os.environ.get("BOTTLENECK_KERNEL_UPSTREAM", "api.anthropic.com")
-PORT = int(os.environ.get("BOTTLENECK_KERNEL_PORT", "8791") or 8791)
+# 8790, inherited from the proxy this replaced. Keeping the port means a head
+# already running - launched with ANTHROPIC_BASE_URL baked into its environment,
+# where it cannot be changed - keeps working across the swap.
+PORT = int(os.environ.get("BOTTLENECK_KERNEL_PORT", "8790") or 8790)
 LOG = os.path.expanduser(
     os.environ.get("BOTTLENECK_KERNEL_LOG",
                    os.path.join(os.environ.get("BOTTLENECK_STATE")
