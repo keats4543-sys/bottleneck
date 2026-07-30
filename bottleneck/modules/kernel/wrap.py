@@ -1,57 +1,46 @@
-"""wrap.py - the system prompt, rewritten on its way past. Nothing else.
+"""wrap.py - the claude call, wrapped, with the rewriting left to stages.
 
 A demonstration that this class of feature belongs to a module rather than to a
-separate program: about two hundred lines, standard library only, no venv and
-no dependency. It exists to prove the shape works, not to replace a proxy that
-does the job properly - see the module README for which to run.
+separate program: standard library only, no venv and no dependency. It exists to
+prove the shape works, not to replace a proxy that does the job properly - see
+the module README for which to run.
 
 What it is: an HTTP proxy on loopback that claude talks to because
 ANTHROPIC_BASE_URL says so. Everything it receives it forwards to the real API
-with the headers it came with, and streams the answer straight back. The only
-thing it changes is the text of the system prompt.
+with the headers it came with, and streams the answer straight back.
 
-Three rules it will not break, all of them about prompt caching. Caching is a
-byte-prefix match, so anything that alters the prefix differently between two
-requests in a session turns a cache read into a cache write and costs money
-rather than saving it.
+What it changes is not decided here. This file knows how to be a hop in the
+conversation and nothing about identities, memory or compaction - it hands the
+body to `stages.run()` and forwards whatever comes back. Nothing is built in,
+the identity rewrite least of all: it is stages/identity.py, listed in
+stages.json, and deleting that line turns it off.
 
-  1. The shape of the system field is never touched. The same blocks in the
-     same order, each keeping its own cache_control exactly where claude put
-     it. Only the text inside a block changes.
-  2. Every rewrite is a pure function of the text it is given. No clock, no
-     counter, no request id - the same bytes in must always give the same bytes
-     out, on the first request of a session and the four hundredth.
-  3. A block is never left empty. Claude Code sends parts of its identity as
-     blocks of their own, and excising one of those outright leaves "", which
-     the API rejects with a 400 - so the kernel goes in the block that was
-     emptied, which is where the identity it replaces used to be anyway.
+So the rules the rewrite is held to live with the registry that enforces them
+(see stages/__init__.py). The two this file keeps are its own:
 
-And one rule about being wrong. The sentences excised are pinned to an exact
-release of Claude Code; a future one that rewords its opening matches nothing,
-the stock identity survives, and the kernel goes in beside it. Nothing fails,
-which is the problem - so a real system prompt that any excision missed is
-recorded in the usage log, left as a mark for the status line, and reported by
-`bottleneck kernel`. The sentences live in identity.json, one copy, read by
-both backends.
+  Never fail a request over a stage. A stage that throws is put down and the
+  turn goes on without it. It was a thing you added to a session and is never a
+  reason to lose one.
+
+  Never buffer the answer. It is streamed token by token and the whole point is
+  that it arrives that way, so this re-chunks as it goes rather than reading to
+  the end before saying anything.
 """
 import http.client
 import http.server
 import json
 import os
-import re
 import socket
 import sys
 import threading
 import time
 
+from . import stages
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 UPSTREAM = os.environ.get("BOTTLENECK_KERNEL_UPSTREAM", "api.anthropic.com")
 PORT = int(os.environ.get("BOTTLENECK_KERNEL_PORT", "8791") or 8791)
-KERNEL_FILE = os.environ.get("BOTTLENECK_KERNEL_FILE",
-                             os.path.join(HERE, "kernel.md"))
-IDENTITY_FILE = os.environ.get("BOTTLENECK_KERNEL_IDENTITY",
-                               os.path.join(HERE, "identity.json"))
 LOG = os.path.expanduser(
     os.environ.get("BOTTLENECK_KERNEL_LOG",
                    os.path.join(os.environ.get("BOTTLENECK_STATE")
@@ -75,170 +64,52 @@ HOP = {"host", "content-length", "connection", "keep-alive", "te", "upgrade",
        "transfer-encoding", "proxy-authorization", "proxy-connection",
        "accept-encoding"}
 
-HEADER = "# Operating Identity\n\n"
-
-# The sentences that make claude claude, read from the one file that has them.
-# Not written here: the external backend needs the same list, and two copies of
-# a pattern pinned to somebody else's release notes is one copy that gets
-# updated. See identity.json, and `identity_gap()` for how they are held level.
-_LOADED = None
-
-
-def identity(reload=False):
-    """[{name, pattern, witness, re}] - what a rewrite is expected to excise.
-
-    Never raises. An unreadable or malformed source excises nothing, which then
-    shows up as every excision missing on the first real prompt - loud, rather
-    than a rewrite that quietly does half its job.
-    """
-    global _LOADED
-    if _LOADED is not None and not reload and _LOADED[0] == IDENTITY_FILE:
-        return _LOADED[1]
-    out = []
-    try:
-        with open(IDENTITY_FILE) as fh:
-            for row in (json.load(fh).get("excise") or []):
-                out.append(dict(row, re=re.compile(row["pattern"])))
-    except (OSError, ValueError, KeyError, TypeError, re.error):
-        out = []
-    _LOADED = (IDENTITY_FILE, out)
-    return out
-
-
-def min_system_chars():
-    """Below this, a system prompt is a probe and a miss means nothing.
-
-    Claude Code opens with tens of thousands of characters. The quota check it
-    makes at startup carries almost none, and calling that a failed excision
-    would cry wolf on every session before it began.
-    """
-    try:
-        with open(IDENTITY_FILE) as fh:
-            return int(json.load(fh).get("min_system_chars") or 2000)
-    except (OSError, ValueError, TypeError):
-        return 2000
-
-
-def kernel_text():
-    try:
-        with open(KERNEL_FILE) as fh:
-            return fh.read().strip()
-    except OSError:
-        return ""
-
-
-def rewrite_text(text, hit=None):
-    """The stock identity out. A pure function of `text` - see rule 2.
-
-    `hit` is a set collecting the name of every excision that matched; what is
-    missing from it afterwards is what this build of Claude Code no longer says
-    the way we think it does.
-    """
-    for row in identity():
-        found, count = row["re"].subn("", text)
-        if count and hit is not None:
-            hit.add(row["name"])
-        text = found
-    return text
-
-
-def rewrite_system(system, kernel, hit=None):
-    """The system field, rewritten in place. Same shape, different words."""
-    if not kernel:
-        return system
-    inject = HEADER + kernel + "\n\n"
-    if isinstance(system, str):
-        return inject + rewrite_text(system, hit)
-    if not isinstance(system, list):
-        return system
-
-    out, originals = [], []
-    for block in system:
-        if isinstance(block, dict) and block.get("type") == "text":
-            block = dict(block)
-            originals.append(block.get("text") or "")
-            block["text"] = rewrite_text(block["text"], hit)
-        else:
-            originals.append(None)
-        out.append(block)
-
-    def is_text(b):
-        return isinstance(b, dict) and b.get("type") == "text"
-
-    # The block a replacement emptied, if any, else the first. Rule 3: putting
-    # the kernel where the identity was keeps every block non-empty without
-    # dropping one, and dropping one would move a caching breakpoint.
-    at = next((i for i, b in enumerate(out) if is_text(b) and not b["text"]),
-              next((i for i, b in enumerate(out) if is_text(b)), None))
-    if at is not None:
-        out[at]["text"] = inject + out[at]["text"]
-    # Anything still empty keeps what it came with: better an identity we
-    # failed to excise than a request the API refuses.
-    for i, block in enumerate(out):
-        if is_text(block) and not block["text"] and originals[i]:
-            block["text"] = originals[i]
-    return out
-
-
-def system_chars(system):
-    if isinstance(system, str):
-        return len(system)
-    if not isinstance(system, list):
-        return 0
-    return sum(len(b.get("text") or "") for b in system
-               if isinstance(b, dict) and b.get("type") == "text")
-
-
 def rewrite_body(raw):
-    """(body, missed) - the body with its system prompt rewritten, or as it came.
+    """(body, reports) - the body after every stage, or as it came.
 
-    Anything unparseable goes through untouched. A proxy that drops a request
-    it did not understand is a proxy that breaks a session it could have left
-    alone.
-
-    `missed` is the names of the excisions that found nothing in a system
-    prompt big enough that they should have, or None when this was not a body
-    to rewrite. Empty means every sentence we expect to remove was there and
-    was removed - the only outcome in which the kernel is the only identity in
-    the request.
+    Anything unparseable goes through untouched. A proxy that drops a request it
+    did not understand is a proxy that breaks a session it could have left
+    alone - and the same goes for one no stage had anything to say about.
     """
     try:
         body = json.loads(raw)
     except (ValueError, TypeError):
-        return raw, None
-    if not isinstance(body, dict) or "system" not in body:
-        return raw, None
-    kernel = kernel_text()
-    if not kernel:
-        return raw, None
-    hit = set()
-    body["system"] = rewrite_system(body["system"], kernel, hit)
-    missed = None
-    if system_chars(body["system"]) >= min_system_chars():
-        missed = [row["name"] for row in identity() if row["name"] not in hit]
-        if not identity():
-            missed = ["identity.json unreadable"]
-    return json.dumps(body).encode(), missed
+        return raw, {}
+    if not isinstance(body, dict) or not stages.enabled():
+        return raw, {}
+    if "system" not in body and "messages" not in body:
+        return raw, {}                  # nothing any stage is handed is in it
+    reports = stages.run(body, {"path": "/v1/messages"})
+    # Re-serialised whether or not anything was reported: a stage that did its
+    # work and said nothing about it is a stage whose work would be thrown away
+    # here otherwise. Every request takes the same path, so the bytes stay
+    # stable across a session either way, which is all caching asks.
+    return json.dumps(body).encode(), reports
 
 
 def mark_file():
-    return os.path.join(os.path.dirname(LOG), "identity-missed.json")
+    return os.path.join(os.path.dirname(LOG), "stage-gaps.json")
 
 
-def mark_gap(missed):
-    """Leave the miss where a dashboard in another process can find it.
+def mark_gap(gaps):
+    """Leave what the stages reported where another process can find it.
 
-    The rewrite happens here; the status line is drawn somewhere else. A file
-    is the only thing the two share, and it is written on a miss and removed on
-    a clean rewrite so it always describes the last real prompt rather than the
-    worst one ever seen.
+    The rewrite happens here; the status line is drawn in the dashboard. A file
+    is the only thing the two share. Written when a stage that judged the
+    request found something wrong, removed when one judged it and did not - so
+    it describes the last request anybody looked at rather than the worst one
+    ever seen.
+
+    `gaps` of None means no stage was in a position to judge: the mark is left
+    exactly as it was, because a startup probe is not evidence of anything.
     """
+    if gaps is None:
+        return
     try:
-        if missed:
+        if gaps:
             os.makedirs(os.path.dirname(LOG), exist_ok=True)
             with open(mark_file(), "w") as fh:
-                json.dump({"ts": time.strftime("%FT%T%z"), "missed": missed},
-                          fh)
+                json.dump({"ts": time.strftime("%FT%T%z"), "gaps": gaps}, fh)
         elif os.path.exists(mark_file()):
             os.remove(mark_file())
     except OSError:
@@ -246,12 +117,19 @@ def mark_gap(missed):
 
 
 def gap():
-    """The excisions that missed the last real system prompt. [] when clean."""
+    """What the stages could not do to the last request judged. [] when clean.
+
+    Read by the dashboard, and by `bottleneck kernel`. Stages that would not
+    load at all are in here too - a stage configured and silently absent is the
+    same failure as one that ran and found nothing.
+    """
+    out = []
     try:
         with open(mark_file()) as fh:
-            return list(json.load(fh).get("missed") or [])
+            out = list(json.load(fh).get("gaps") or [])
     except (OSError, ValueError, TypeError):
-        return []
+        out = []
+    return out + [f"{name}: {why}" for name, why in sorted(stages.broken().items())]
 
 
 def note_usage(row):
@@ -315,9 +193,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def relay(self, raw):
         rewrote = self.path.split("?")[0] in INTERCEPT
-        body, missed = rewrite_body(raw) if rewrote else (raw, None)
-        if missed is not None:
-            mark_gap(missed)
+        body, reports = rewrite_body(raw) if rewrote else (raw, {})
+        mark_gap(stages.verdict(reports))
         headers = {k: v for k, v in self.headers.items()
                    if k.lower() not in HOP}
         headers["Content-Length"] = str(len(body))
@@ -363,8 +240,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         row = {"ts": time.strftime("%FT%T%z"), "path": self.path,
                "status": upstream.status, "rewritten": rewrote,
                "elapsed_s": round(time.time() - started, 2)}
-        if missed:
-            row["identity_missed"] = missed
+        told = stages.gaps(reports)
+        if told:
+            row["stage_gaps"] = told
+        if reports:
+            row["stages"] = sorted(reports)
         row.update(usage_of(seen))
         note_usage(row)
 
@@ -428,14 +308,15 @@ def serve(port=None):
     """Run until killed. This is what `python -m ...wrap` does."""
     port = PORT if port is None else port
     srv = Server(("127.0.0.1", port), Handler)
-    kernel = kernel_text()
-    rows = identity()
+    running = stages.enabled()
     print(f"[kernel] {base_url(port)} -> https://{UPSTREAM}  "
-          f"kernel={len(kernel)} chars  excise={len(rows)}  log={LOG}",
+          f"stages={','.join(n for n, _ in running) or 'none'}  log={LOG}",
           flush=True)
-    if not rows:
-        print(f"[kernel] !! nothing to excise - {IDENTITY_FILE} is missing or "
-              f"malformed, so the stock identity will survive", flush=True)
+    for name, why in sorted(stages.broken().items()):
+        print(f"[kernel] !! {name}: {why}", flush=True)
+    if not running:
+        print("[kernel] !! nothing configured to run - every request will be "
+              "forwarded exactly as it came", flush=True)
     srv.serve_forever()
 
 

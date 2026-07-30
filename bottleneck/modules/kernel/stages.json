@@ -1,0 +1,28 @@
+{
+  "_": [
+    "What runs on a request, in this order, and nothing else. Editing this file",
+    "is how you change what a session is.",
+    "",
+    "The default is deliberately not 'everything in stages/'. A module is",
+    "harmless to have loaded and its default is on; a stage rewrites the",
+    "conversation, and one that started running because it happened to be",
+    "checked out would be a change to every session that nobody made. So a stage",
+    "on disk and not in this list is available, listed by `bottleneck kernel",
+    "stages`, and not running.",
+    "",
+    "identity is in this list rather than built into the wrapper, and deleting",
+    "the line turns it off. That is the whole test of whether this is an",
+    "interface: nothing here is privileged, including ours.",
+    "",
+    "BOTTLENECK_KERNEL_STAGES overrides the list for one process - a",
+    "comma-separated order, or 'none' to forward every request exactly as it",
+    "came, which is the first thing to try when a session is behaving oddly."
+  ],
+  "run": ["identity"],
+  "settings": {
+    "memory": {
+      "file": null,
+      "max_chars": 4000
+    }
+  }
+}

@@ -1,8 +1,16 @@
-"""`bottleneck kernel` - which backend is up, what it injects, what it cost."""
+"""`bottleneck kernel` - which backend is up, what it runs, what it cost.
+
+Nothing in here knows what a stage does. It asks the registry which are running
+and prints what each one reports and explains about itself, so a stage you write
+is as visible as the ones shipped - which is the difference between an interface
+and a list of special cases.
+"""
+import copy
 import json
 import os
 
 from . import proxy
+from . import stages
 from . import wrap
 
 
@@ -21,72 +29,97 @@ def usage_rows(path, limit=200):
     return out
 
 
+# Claude Code's real opening, one release of it, padded to the length of the
+# real thing - a stage that only judges prompts big enough to be real (and they
+# should) has nothing to say about a three-line sample.
+def sample():
+    bulk = ("\nIMPORTANT: ...the rest of claude's own prompt continues here, "
+            "untouched, for about this much more...\n" * 90)
+    return {
+        "system": [
+            {"type": "text",
+             "text": "You are Claude Code, Anthropic's official CLI for "
+                     "Claude.\ncc-billing-header: cc_version=x; "
+                     "cc_entrypoint=cli;"},
+            {"type": "text",
+             "text": "You are an interactive agent that helps users with "
+                     "software engineering tasks.",
+             "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+            {"type": "text", "text": bulk,
+             "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+        ],
+        "messages": [{"role": "user", "content": "what does this repo do?"}],
+    }
+
+
 def show_prompt():
-    """The system prompt a head would actually receive, rewritten here.
+    """What a head would actually be sent, run through the stages configured.
 
-    The claim this command exists to check: that the kernel replaces the stock
-    identity rather than arguing with it. Run against the real opening of
-    claude's own prompt, so what comes back is what a head would get.
+    The claim this command exists to check, and it is checkable rather than
+    asserted: every stage runs here exactly as it runs on a live request, so
+    what comes back is what a head gets.
     """
-    stock = [
-        {"type": "text",
-         "text": "You are Claude Code, Anthropic's official CLI for Claude.\n"
-                 "cc-billing-header: cc_version=x; cc_entrypoint=cli;"},
-        {"type": "text",
-         "text": "You are an interactive agent that helps users with software "
-                 "engineering tasks.",
-         "cache_control": {"type": "ephemeral", "ttl": "1h"}},
-        {"type": "text",
-         "text": "\nIMPORTANT: ...the rest of claude's own prompt continues "
-                 "here, untouched...",
-         "cache_control": {"type": "ephemeral", "ttl": "1h"}},
-    ]
-    hit = set()
-    got = wrap.rewrite_system(json.loads(json.dumps(stock)), wrap.kernel_text(),
-                              hit)
-    print(f"  {len(stock)} system blocks in, {len(got)} out "
-          f"(the shape is never changed - see wrap.py)")
-    for i, (was, now) in enumerate(zip(stock, got)):
-        same = was.get("cache_control") == now.get("cache_control")
-        print(f"\n  --- block {i}: {len(was['text'])} -> {len(now['text'])} "
-              f"chars, cache_control "
-              f"{'unchanged' if same else 'MOVED - this is a bug'}")
-        for line in (now["text"].splitlines() or [""])[:6]:
-            print(f"      {line[:96]}")
-        if len(now["text"].splitlines()) > 6:
-            print(f"      ... {len(now['text'].splitlines()) - 6} more lines")
+    was, now = sample(), sample()
+    reports = stages.run(now, {"path": "/v1/messages", "why": "show"})
+    running = stages.enabled()
+    if not running:
+        print("  no stages configured - a head would be sent claude's own "
+              f"prompt, unchanged\n  ({stages.CONFIG})")
+        return 0
+    print(f"  stages: {', '.join(n for n, _ in running)}")
 
-    # The sample above is one release's opening, written down. The check that
-    # matters is against a rewrite the wrapper actually performed, so both are
-    # reported and either one failing is a non-zero exit.
-    rows = wrap.identity()
-    missed = [row["name"] for row in rows if row["name"] not in hit]
-    print()
-    if not rows:
-        print(f"  FAILING: no excisions loaded - {wrap.IDENTITY_FILE}")
-        return 1
-    for row in rows:
-        ok = row["name"] not in missed
-        print(f"  {'excised ' if ok else 'MISSED  '}{row['name']:<18}"
-              f"(last confirmed against Claude Code {row.get('matched', '?')})")
-    live = live_gap()
-    for line in live:
-        print(f"  FAILING: {line}")
-    if any("config.toml" in line for line in live):
-        # The external backend keeps its own copy because it is not ours to
-        # rewrite. identity.json is still the source; this is that source, in
-        # the shape that file wants, so bringing them level is a paste.
-        print(f"\n  {proxy.ROOT}/config.toml wants:\n")
-        for row in rows:
-            print(f"      [[rewrite.replacements]]\n"
-                  f"      pattern = {json.dumps(row['pattern'])}\n"
-                  f"      replace = \"\"\n")
-    if missed:
-        print(f"\n  A sentence that matches nothing is not removed, and the "
-              f"kernel goes in\n  beside the identity it was meant to replace. "
-              f"Reword {wrap.IDENTITY_FILE}\n  to match this build of Claude "
-              f"Code.")
-    return 1 if missed or live else 0
+    print(f"\n  system: {len(was['system'])} blocks in, {len(now['system'])} "
+          f"out (the shape is never ours to change)")
+    for i, (before, after) in enumerate(zip(was["system"], now["system"])):
+        same = before.get("cache_control") == after.get("cache_control")
+        print(f"\n  --- block {i}: {len(before['text'])} -> "
+              f"{len(after['text'])} chars, cache_control "
+              f"{'unchanged' if same else 'MOVED - this is a bug'}")
+        for line in (after["text"].splitlines() or [""])[:6]:
+            print(f"      {line[:96]}")
+        extra = len(after["text"].splitlines()) - 6
+        if extra > 0:
+            print(f"      ... {extra} more lines")
+
+    tail_was = json.dumps(was["messages"][-1])
+    tail_now = json.dumps(now["messages"][-1])
+    if tail_was != tail_now:
+        print(f"\n  --- newest turn: {len(tail_was)} -> {len(tail_now)} chars "
+              f"(after the last breakpoint, so it is nobody's prefix)")
+        for line in json.loads(tail_now)["content"].splitlines()[:8]:
+            print(f"      {line[:96]}")
+
+    print("\n  what each stage said of it")
+    for name, stage in running:
+        report = reports.get(name) or {}
+        told = ", ".join(f"{k}={v}" for k, v in sorted(report.items())
+                         if k not in ("gap", "judged")) or "nothing to report"
+        print(f"    {name:<10} {stage['writes']:<7} {told}")
+        for line in (stage.get("explain") or (lambda: []))():
+            print(f"      {line}")
+
+    holes = live_gap()
+    for line in stages.gaps(reports):
+        if line not in holes:
+            holes.append(line)
+    for line in holes:
+        print(f"\n  FAILING: {line}")
+    if any("config.toml" in line for line in holes):
+        print(proxy.stanza())
+    return 1 if holes else 0
+
+
+def show_stages():
+    """Every stage on disk: what runs, in what order, and what does not."""
+    print(f"  {stages.CONFIG}")
+    print(f"  BOTTLENECK_KERNEL_STAGES overrides it for one process "
+          f"('none' runs the wrapper as a plain hop)\n")
+    for name, writes, summary, trouble in stages.listing():
+        flag = "  " if trouble is None else "!!"
+        print(f"  {flag} {name:<10} {writes:<7} {summary}")
+        if trouble:
+            print(f"       {trouble}")
+    return 0
 
 
 def live_gap():
@@ -106,6 +139,9 @@ def kernel_cmd(cmd, rest):
     if what == "show":
         return show_prompt()
 
+    if what in ("stages", "stage"):
+        return show_stages()
+
     if what == "start":
         if who.up():
             print(f"already up on {who.base_url()} ({which})")
@@ -123,6 +159,7 @@ def kernel_cmd(cmd, rest):
 
     if what and what != "status":
         print(f"unknown: bottleneck kernel {what}")
+        print("  status | start | show | stages")
         return 2
 
     live = who.up()
@@ -131,23 +168,23 @@ def kernel_cmd(cmd, rest):
         print(f"     {proxy.ROOT}")
         chars = proxy.kernel_chars()
         log = os.path.join(proxy.ROOT, "log", "usage.jsonl")
+        if chars:
+            print(f"     identity kernel: {chars} chars, replacing the stock "
+                  f"block")
     else:
         print(f"     {os.path.dirname(os.path.abspath(wrap.__file__))} "
               f"(in this module, standard library only)")
-        chars = len(wrap.kernel_text())
+        running = ", ".join(n for n, _ in stages.enabled()) or "none"
+        print(f"     stages: {running}")
         log = wrap.LOG
-    if chars:
-        print(f"     identity kernel: {chars} chars, replacing the stock block")
-
     holes = live_gap()
     if holes:
         print()
         for line in holes:
             print(f"  !! {line}")
-        print("  !! the kernel is going in beside the stock identity, not "
-              "instead of it")
-        print("  !! `bottleneck kernel show` for which sentence, "
-              f"{wrap.IDENTITY_FILE} to fix it")
+        print("  !! a stage that is configured is not doing what it was "
+              "configured to do")
+        print("  !! `bottleneck kernel show` runs them and says which")
         print()
 
     if not live:

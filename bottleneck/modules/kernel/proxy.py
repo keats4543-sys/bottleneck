@@ -137,10 +137,10 @@ def gap():
                still in there after a rewrite is an excision that failed on a
                real prompt, whatever the config says.
     """
-    from . import wrap
-    want = wrap.identity()
+    from .stages import identity as ident
+    want = ident.identity()
     if not want:
-        return ["identity.json unreadable"]
+        return [f"identity.json unreadable - {ident.IDENTITY_FILE}"]
     have = config_patterns()
     out = [f"config.toml does not excise {row['name']}"
            for row in want if row["pattern"] not in have]
@@ -152,9 +152,25 @@ def gap():
     return out
 
 
+def stanza():
+    """identity.json's patterns in the shape config.toml wants them.
+
+    The external backend keeps its own copy because it is not ours to rewrite.
+    identity.json stays the source; this makes bringing them level a paste
+    rather than a re-derivation of somebody else's escaping rules.
+    """
+    from .stages import identity as ident
+    out = [f"\n  {os.path.join(ROOT, 'config.toml')} wants:\n"]
+    for row in ident.identity():
+        out.append(f"      [[rewrite.replacements]]\n"
+                   f"      pattern = {json.dumps(row['pattern'])}\n"
+                   f"      replace = \"\"\n")
+    return "\n".join(out)
+
+
 def dumped_survivors():
     """Excisions whose text is still in the last body the proxy sent."""
-    from . import wrap
+    from .stages import identity as ident
     path = os.path.join(ROOT, "log", "last_request.json")
     try:
         with open(path) as fh:
@@ -162,10 +178,10 @@ def dumped_survivors():
     except (OSError, ValueError):
         return []
     system = (body or {}).get("system")
-    if wrap.system_chars(system) < wrap.min_system_chars():
+    if ident.system_chars(system) < ident.min_system_chars():
         return []
     blob = json.dumps(system)
-    return [row["name"] for row in wrap.identity()
+    return [row["name"] for row in ident.identity()
             if row.get("witness") and row["witness"] in blob]
 
 

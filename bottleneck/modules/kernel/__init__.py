@@ -36,10 +36,11 @@ from . import wrap
 from .cli import kernel_cmd
 
 
-USAGE = """Heads run through a system-prompt proxy (`bottleneck kernel`):
-  bottleneck kernel        which backend is up, what it injects, what it cost
+USAGE = """Heads run through a rewriting proxy (`bottleneck kernel`):
+  bottleneck kernel        which backend is up, what it runs, what it cost
   bottleneck kernel start  bring it up now rather than at the next head
-  bottleneck kernel show   the system prompt a head would actually receive"""
+  bottleneck kernel show   what a head would actually be sent, stage by stage
+  bottleneck kernel stages what can run, what does run, and in what order"""
 
 
 def backend():

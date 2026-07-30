@@ -27,12 +27,18 @@ import threading
 sys.path.insert(0, os.path.abspath(os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "..")))
 
-from bottleneck.modules.kernel import wrap
+from bottleneck.modules.kernel import stages, wrap
+from bottleneck.modules.kernel.stages import identity as ident
 
 TMP = tempfile.mkdtemp(prefix="bottleneck-wrap-")
 wrap.LOG = os.path.join(TMP, "usage.jsonl")
-wrap.KERNEL_FILE = os.path.join(TMP, "kernel.md")
-open(wrap.KERNEL_FILE, "w").write("BE TERSE. Lead with the finding.")
+ident.KERNEL_FILE = os.path.join(TMP, "kernel.md")
+open(ident.KERNEL_FILE, "w").write("BE TERSE. Lead with the finding.")
+
+# The wrapper runs whatever is configured and nothing by default, so a test of
+# the wrapper has to say what it is wrapping.
+os.environ["BOTTLENECK_KERNEL_STAGES"] = "identity"
+stages.forget()
 
 # Nothing here may start a real service. See wrap.AUTOSTART.
 os.environ["BOTTLENECK_KERNEL_AUTOSTART"] = "0"
@@ -70,7 +76,7 @@ def stock():
 
 print("\nthe shape of the system field is never touched")
 was = stock()
-now = wrap.rewrite_system(json.loads(json.dumps(was)), wrap.kernel_text())
+now = ident.rewrite_system(json.loads(json.dumps(was)), ident.kernel_text())
 check("the same number of blocks", len(now), len(was))
 check("each keeping its own cache_control, exactly where it was",
       [b.get("cache_control") for b in now],
@@ -93,25 +99,26 @@ check("and the rest of claude's prompt is untouched",
 
 
 print("\nevery rewrite is a pure function of the text")
-again = wrap.rewrite_system(json.loads(json.dumps(stock())), wrap.kernel_text())
+again = ident.rewrite_system(json.loads(json.dumps(stock())),
+                             ident.kernel_text())
 check("the same bytes in, the same bytes out",
       [b["text"] for b in again], [b["text"] for b in now])
 check("a thousand times over", all(
-    [b["text"] for b in wrap.rewrite_system(json.loads(json.dumps(stock())),
-                                            wrap.kernel_text())]
+    [b["text"] for b in ident.rewrite_system(json.loads(json.dumps(stock())),
+                                             ident.kernel_text())]
     == [b["text"] for b in now] for _ in range(50)), True)
 
 
 print("\na body it cannot read goes through as it came")
-check("not json at all", wrap.rewrite_body(b"{not json"), (b"{not json", None))
-check("json with no system prompt in it",
-      wrap.rewrite_body(b'{"model":"m"}'), (b'{"model":"m"}', None))
-kernel_was, wrap.KERNEL_FILE = wrap.KERNEL_FILE, os.path.join(TMP, "gone.md")
+check("not json at all", wrap.rewrite_body(b"{not json"), (b"{not json", {}))
+check("json with nothing a stage is ever handed in it",
+      wrap.rewrite_body(b'{"model":"m"}'), (b'{"model":"m"}', {}))
+kernel_was, ident.KERNEL_FILE = ident.KERNEL_FILE, os.path.join(TMP, "gone.md")
 check("and with no kernel configured, nothing is rewritten",
       json.loads(wrap.rewrite_body(json.dumps(
           {"system": stock()}).encode())[0])["system"][1]["text"],
       stock()[1]["text"])
-wrap.KERNEL_FILE = kernel_was
+ident.KERNEL_FILE = kernel_was
 
 
 print("\na reword of claude's opening is loud, not silent")
@@ -132,40 +139,51 @@ def reworded():
     return was
 
 
-body, missed = wrap.rewrite_body(json.dumps({"system": reworded()}).encode())
+body, reports = wrap.rewrite_body(json.dumps({"system": reworded()}).encode())
+missed = reports["identity"].get("missed")
 check("the excision that no longer matches is named",
       missed, ["interactive-agent"])
-check("and the one that still does is not", "cli-sentence" in (missed or []),
-      False)
+check("and the one that still does is not",
+      reports["identity"]["excised"], ["cli-sentence"])
 check("the reworded sentence is still in what goes to the API - we did not "
       "guess", "interactive coding agent" in json.dumps(json.loads(body)), True)
 check("so the request now carries two identities, which is the point",
       "BE TERSE" in json.dumps(json.loads(body)), True)
 
-wrap.mark_gap(missed)
+wrap.mark_gap(stages.verdict(reports))
 check("the miss is left where a dashboard in another process can find it",
-      wrap.gap(), ["interactive-agent"])
+      wrap.gap(), ["identity: interactive-agent matched nothing, so the stock "
+                   "identity is still in the prompt beside the kernel"])
 
 _, clean = wrap.rewrite_body(json.dumps(
     {"system": [dict(b, text=b["text"] + BIG) for b in stock()]}).encode())
-check("a prompt it fully handled reports nothing missed", clean, [])
-wrap.mark_gap(clean)
+check("a prompt it fully handled reports nothing missed",
+      stages.verdict(clean), [])
+wrap.mark_gap(stages.verdict(clean))
 check("and clears the mark, so it describes the last prompt not the worst",
       wrap.gap(), [])
 
+# The mark must survive a probe. Before there was a verdict separate from the
+# gaps, claude checking its quota looked exactly like a clean rewrite and wiped
+# the failure off the status line before anyone saw it.
+wrap.mark_gap(stages.verdict(reports))
 small = json.dumps({"system": [{"type": "text", "text": "quota"}]}).encode()
-check("a probe too small to be a real prompt is not called a failure",
-      wrap.rewrite_body(small)[1], None)
+probe = stages.verdict(wrap.rewrite_body(small)[1])
+check("a probe too small to be a real prompt reaches no verdict", probe, None)
+wrap.mark_gap(probe)
+check("so it leaves a real failure on the status line", len(wrap.gap()), 1)
+wrap.mark_gap([])
 
-id_was, wrap.IDENTITY_FILE = wrap.IDENTITY_FILE, os.path.join(TMP, "gone.json")
-wrap.identity(reload=True)
+id_was, ident.IDENTITY_FILE = ident.IDENTITY_FILE, os.path.join(TMP, "gone.json")
+ident.identity(reload=True)
 check("and no source of sentences at all is itself the loudest case",
-      wrap.rewrite_body(json.dumps({"system": reworded()}).encode())[1],
-      ["identity.json unreadable"])
-wrap.IDENTITY_FILE = id_was
-wrap.identity(reload=True)
+      wrap.rewrite_body(json.dumps({"system": reworded()}).encode()
+                        )[1]["identity"]["missed"],
+      [f"no excisions loaded - {ident.IDENTITY_FILE}"])
+ident.IDENTITY_FILE = id_was
+ident.identity(reload=True)
 check("the real source loads, with a version it was confirmed against",
-      [(r["name"], bool(r.get("matched"))) for r in wrap.identity()],
+      [(r["name"], bool(r.get("matched"))) for r in ident.identity()],
       [("cli-sentence", True), ("interactive-agent", True)])
 
 

@@ -101,7 +101,7 @@ print("\nthe proxy keeps its own copy of the sentences, and is held to ours")
 # program with its own config. So identity.json stays the source and the two
 # are compared, because a reword applied to one copy and not the other is a
 # rewrite that stopped working with nothing to show for it.
-from bottleneck.modules.kernel import wrap
+from bottleneck.modules.kernel.stages import identity as ident
 config = os.path.join(root, "config.toml")
 base = open(config).read()
 
@@ -112,7 +112,7 @@ def with_patterns(patterns):
         for p in patterns))
 
 
-want = [row["pattern"] for row in wrap.identity()]
+want = [row["pattern"] for row in ident.identity()]
 with_patterns(want)
 check("in step with identity.json, there is nothing to report", p.gap(), [])
 with_patterns(want[:1])
