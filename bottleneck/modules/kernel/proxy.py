@@ -107,6 +107,68 @@ def kernel_chars():
         return 0
 
 
+def config_patterns():
+    """The regexes the proxy's own config says it excises."""
+    try:
+        with open(os.path.join(ROOT, "config.toml")) as fh:
+            text = fh.read()
+    except OSError:
+        return []
+    out = []
+    for got in re.finditer(r'^\s*pattern\s*=\s*"((?:[^"\\]|\\.)*)"\s*$',
+                           text, re.M):
+        try:
+            out.append(json.loads(f'"{got.group(1)}"'))
+        except ValueError:
+            out.append(got.group(1))
+    return out
+
+
+def gap():
+    """What is wrong with this backend's excisions, in words. [] when clean.
+
+    Two checks, because the proxy is somebody else's program and we can only
+    see it from outside:
+
+      drift    its config carries its own copy of the patterns. If that copy
+               and identity.json have parted company, one of them was updated
+               and the other was not, and only one of them is running.
+      survivor its debug dump is the body it actually sent. A stock sentence
+               still in there after a rewrite is an excision that failed on a
+               real prompt, whatever the config says.
+    """
+    from . import wrap
+    want = wrap.identity()
+    if not want:
+        return ["identity.json unreadable"]
+    have = config_patterns()
+    out = [f"config.toml does not excise {row['name']}"
+           for row in want if row["pattern"] not in have]
+    for extra in have:
+        if extra not in [row["pattern"] for row in want]:
+            out.append("config.toml excises a pattern identity.json "
+                       f"does not: {extra[:40]}")
+    out.extend(f"{name} survived a real prompt" for name in dumped_survivors())
+    return out
+
+
+def dumped_survivors():
+    """Excisions whose text is still in the last body the proxy sent."""
+    from . import wrap
+    path = os.path.join(ROOT, "log", "last_request.json")
+    try:
+        with open(path) as fh:
+            body = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    system = (body or {}).get("system")
+    if wrap.system_chars(system) < wrap.min_system_chars():
+        return []
+    blob = json.dumps(system)
+    return [row["name"] for row in wrap.identity()
+            if row.get("witness") and row["witness"] in blob]
+
+
 def usage(limit=200):
     """(requests, input, output, cache_read) from the proxy's own meter.
 

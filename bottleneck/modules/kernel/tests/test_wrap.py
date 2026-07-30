@@ -103,15 +103,70 @@ check("a thousand times over", all(
 
 
 print("\na body it cannot read goes through as it came")
-check("not json at all", wrap.rewrite_body(b"{not json"), b"{not json")
+check("not json at all", wrap.rewrite_body(b"{not json"), (b"{not json", None))
 check("json with no system prompt in it",
-      wrap.rewrite_body(b'{"model":"m"}'), b'{"model":"m"}')
+      wrap.rewrite_body(b'{"model":"m"}'), (b'{"model":"m"}', None))
 kernel_was, wrap.KERNEL_FILE = wrap.KERNEL_FILE, os.path.join(TMP, "gone.md")
 check("and with no kernel configured, nothing is rewritten",
       json.loads(wrap.rewrite_body(json.dumps(
-          {"system": stock()}).encode()))["system"][1]["text"],
+          {"system": stock()}).encode())[0])["system"][1]["text"],
       stock()[1]["text"])
 wrap.KERNEL_FILE = kernel_was
+
+
+print("\na reword of claude's opening is loud, not silent")
+# The failure this whole file cannot otherwise catch: the sentences excised are
+# pinned to one release of Claude Code. A later one that says the same thing
+# differently matches nothing, and the kernel goes in *beside* the identity it
+# was meant to replace - a session that reads as working and is not. So a
+# system prompt big enough to be real, with an excision that found nothing in
+# it, has to leave a mark somewhere a person will see.
+BIG = "\n\nfiller that makes this a real prompt rather than a probe. " * 60
+
+
+def reworded():
+    was = stock()
+    was[1]["text"] = ("You are an interactive coding agent that helps users "
+                      "with software engineering work.")
+    was[2]["text"] += BIG
+    return was
+
+
+body, missed = wrap.rewrite_body(json.dumps({"system": reworded()}).encode())
+check("the excision that no longer matches is named",
+      missed, ["interactive-agent"])
+check("and the one that still does is not", "cli-sentence" in (missed or []),
+      False)
+check("the reworded sentence is still in what goes to the API - we did not "
+      "guess", "interactive coding agent" in json.dumps(json.loads(body)), True)
+check("so the request now carries two identities, which is the point",
+      "BE TERSE" in json.dumps(json.loads(body)), True)
+
+wrap.mark_gap(missed)
+check("the miss is left where a dashboard in another process can find it",
+      wrap.gap(), ["interactive-agent"])
+
+_, clean = wrap.rewrite_body(json.dumps(
+    {"system": [dict(b, text=b["text"] + BIG) for b in stock()]}).encode())
+check("a prompt it fully handled reports nothing missed", clean, [])
+wrap.mark_gap(clean)
+check("and clears the mark, so it describes the last prompt not the worst",
+      wrap.gap(), [])
+
+small = json.dumps({"system": [{"type": "text", "text": "quota"}]}).encode()
+check("a probe too small to be a real prompt is not called a failure",
+      wrap.rewrite_body(small)[1], None)
+
+id_was, wrap.IDENTITY_FILE = wrap.IDENTITY_FILE, os.path.join(TMP, "gone.json")
+wrap.identity(reload=True)
+check("and no source of sentences at all is itself the loudest case",
+      wrap.rewrite_body(json.dumps({"system": reworded()}).encode())[1],
+      ["identity.json unreadable"])
+wrap.IDENTITY_FILE = id_was
+wrap.identity(reload=True)
+check("the real source loads, with a version it was confirmed against",
+      [(r["name"], bool(r.get("matched"))) for r in wrap.identity()],
+      [("cli-sentence", True), ("interactive-agent", True)])
 
 
 print("\ntoken counts, including the cache write nobody bills you for twice")

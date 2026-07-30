@@ -29,6 +29,7 @@ not come up, the head launches straight to the API without the rewrite.
     commands `bottleneck kernel` - what is running and what it has cost
 """
 import os
+import time
 
 from . import proxy
 from . import wrap
@@ -69,6 +70,27 @@ def env(spec):
     return {"ANTHROPIC_BASE_URL": who.base_url()}
 
 
+_GAP = [0.0, []]
+
+
+def gap():
+    """What the current backend is failing to excise. [] when clean.
+
+    Cached, because this reads files and the status line asks every couple of
+    seconds. Thirty seconds late is soon enough for a fault that only changes
+    when Claude Code is upgraded.
+    """
+    now = time.time()
+    if now < _GAP[0]:
+        return _GAP[1]
+    try:
+        _GAP[1] = chosen().gap()
+    except Exception:                   # noqa: BLE001 - never cost a redraw
+        _GAP[1] = []
+    _GAP[0] = now + 30
+    return _GAP[1]
+
+
 def status(heads):
     # The presence check comes first, and is not decoration: `up` is a probe of
     # a port, and a port can be answered by something that is not the backend
@@ -77,7 +99,12 @@ def status(heads):
     which = backend()
     if which == "proxy" and not proxy.PRESENT:
         return ""
-    return ("kernel" if which == "proxy" else "kernel*") if chosen().up() else ""
+    if not chosen().up():
+        return ""
+    tag = "kernel" if which == "proxy" else "kernel*"
+    # The whole point of the mark: a rewrite that stopped matching looks
+    # exactly like one that is working, right up until you read the prompt.
+    return tag + "!" if gap() else tag
 
 
 MODULE = {

@@ -25,6 +25,14 @@ rather than saving it.
      blocks of their own, and excising one of those outright leaves "", which
      the API rejects with a 400 - so the kernel goes in the block that was
      emptied, which is where the identity it replaces used to be anyway.
+
+And one rule about being wrong. The sentences excised are pinned to an exact
+release of Claude Code; a future one that rewords its opening matches nothing,
+the stock identity survives, and the kernel goes in beside it. Nothing fails,
+which is the problem - so a real system prompt that any excision missed is
+recorded in the usage log, left as a mark for the status line, and reported by
+`bottleneck kernel`. The sentences live in identity.json, one copy, read by
+both backends.
 """
 import http.client
 import http.server
@@ -42,6 +50,8 @@ UPSTREAM = os.environ.get("BOTTLENECK_KERNEL_UPSTREAM", "api.anthropic.com")
 PORT = int(os.environ.get("BOTTLENECK_KERNEL_PORT", "8791") or 8791)
 KERNEL_FILE = os.environ.get("BOTTLENECK_KERNEL_FILE",
                              os.path.join(HERE, "kernel.md"))
+IDENTITY_FILE = os.environ.get("BOTTLENECK_KERNEL_IDENTITY",
+                               os.path.join(HERE, "identity.json"))
 LOG = os.path.expanduser(
     os.environ.get("BOTTLENECK_KERNEL_LOG",
                    os.path.join(os.environ.get("BOTTLENECK_STATE")
@@ -67,13 +77,46 @@ HOP = {"host", "content-length", "connection", "keep-alive", "te", "upgrade",
 
 HEADER = "# Operating Identity\n\n"
 
-# The sentences that make claude claude. Removing them is what makes room for
-# a different identity rather than a second one arguing with the first.
-STOCK = [
-    re.compile(r"You are Claude Code, Anthropic's official CLI for Claude\.\s*"),
-    re.compile(r"You are an interactive agent that helps users with software "
-               r"engineering tasks\.\s*"),
-]
+# The sentences that make claude claude, read from the one file that has them.
+# Not written here: the external backend needs the same list, and two copies of
+# a pattern pinned to somebody else's release notes is one copy that gets
+# updated. See identity.json, and `identity_gap()` for how they are held level.
+_LOADED = None
+
+
+def identity(reload=False):
+    """[{name, pattern, witness, re}] - what a rewrite is expected to excise.
+
+    Never raises. An unreadable or malformed source excises nothing, which then
+    shows up as every excision missing on the first real prompt - loud, rather
+    than a rewrite that quietly does half its job.
+    """
+    global _LOADED
+    if _LOADED is not None and not reload and _LOADED[0] == IDENTITY_FILE:
+        return _LOADED[1]
+    out = []
+    try:
+        with open(IDENTITY_FILE) as fh:
+            for row in (json.load(fh).get("excise") or []):
+                out.append(dict(row, re=re.compile(row["pattern"])))
+    except (OSError, ValueError, KeyError, TypeError, re.error):
+        out = []
+    _LOADED = (IDENTITY_FILE, out)
+    return out
+
+
+def min_system_chars():
+    """Below this, a system prompt is a probe and a miss means nothing.
+
+    Claude Code opens with tens of thousands of characters. The quota check it
+    makes at startup carries almost none, and calling that a failed excision
+    would cry wolf on every session before it began.
+    """
+    try:
+        with open(IDENTITY_FILE) as fh:
+            return int(json.load(fh).get("min_system_chars") or 2000)
+    except (OSError, ValueError, TypeError):
+        return 2000
 
 
 def kernel_text():
@@ -84,20 +127,28 @@ def kernel_text():
         return ""
 
 
-def rewrite_text(text):
-    """The stock identity out. A pure function of `text` - see rule 2."""
-    for pattern in STOCK:
-        text = pattern.sub("", text)
+def rewrite_text(text, hit=None):
+    """The stock identity out. A pure function of `text` - see rule 2.
+
+    `hit` is a set collecting the name of every excision that matched; what is
+    missing from it afterwards is what this build of Claude Code no longer says
+    the way we think it does.
+    """
+    for row in identity():
+        found, count = row["re"].subn("", text)
+        if count and hit is not None:
+            hit.add(row["name"])
+        text = found
     return text
 
 
-def rewrite_system(system, kernel):
+def rewrite_system(system, kernel, hit=None):
     """The system field, rewritten in place. Same shape, different words."""
     if not kernel:
         return system
     inject = HEADER + kernel + "\n\n"
     if isinstance(system, str):
-        return inject + rewrite_text(system)
+        return inject + rewrite_text(system, hit)
     if not isinstance(system, list):
         return system
 
@@ -106,7 +157,7 @@ def rewrite_system(system, kernel):
         if isinstance(block, dict) and block.get("type") == "text":
             block = dict(block)
             originals.append(block.get("text") or "")
-            block["text"] = rewrite_text(block["text"])
+            block["text"] = rewrite_text(block["text"], hit)
         else:
             originals.append(None)
         out.append(block)
@@ -129,24 +180,78 @@ def rewrite_system(system, kernel):
     return out
 
 
+def system_chars(system):
+    if isinstance(system, str):
+        return len(system)
+    if not isinstance(system, list):
+        return 0
+    return sum(len(b.get("text") or "") for b in system
+               if isinstance(b, dict) and b.get("type") == "text")
+
+
 def rewrite_body(raw):
-    """The request body with its system prompt rewritten, or as it came.
+    """(body, missed) - the body with its system prompt rewritten, or as it came.
 
     Anything unparseable goes through untouched. A proxy that drops a request
     it did not understand is a proxy that breaks a session it could have left
     alone.
+
+    `missed` is the names of the excisions that found nothing in a system
+    prompt big enough that they should have, or None when this was not a body
+    to rewrite. Empty means every sentence we expect to remove was there and
+    was removed - the only outcome in which the kernel is the only identity in
+    the request.
     """
     try:
         body = json.loads(raw)
     except (ValueError, TypeError):
-        return raw
+        return raw, None
     if not isinstance(body, dict) or "system" not in body:
-        return raw
+        return raw, None
     kernel = kernel_text()
     if not kernel:
-        return raw
-    body["system"] = rewrite_system(body["system"], kernel)
-    return json.dumps(body).encode()
+        return raw, None
+    hit = set()
+    body["system"] = rewrite_system(body["system"], kernel, hit)
+    missed = None
+    if system_chars(body["system"]) >= min_system_chars():
+        missed = [row["name"] for row in identity() if row["name"] not in hit]
+        if not identity():
+            missed = ["identity.json unreadable"]
+    return json.dumps(body).encode(), missed
+
+
+def mark_file():
+    return os.path.join(os.path.dirname(LOG), "identity-missed.json")
+
+
+def mark_gap(missed):
+    """Leave the miss where a dashboard in another process can find it.
+
+    The rewrite happens here; the status line is drawn somewhere else. A file
+    is the only thing the two share, and it is written on a miss and removed on
+    a clean rewrite so it always describes the last real prompt rather than the
+    worst one ever seen.
+    """
+    try:
+        if missed:
+            os.makedirs(os.path.dirname(LOG), exist_ok=True)
+            with open(mark_file(), "w") as fh:
+                json.dump({"ts": time.strftime("%FT%T%z"), "missed": missed},
+                          fh)
+        elif os.path.exists(mark_file()):
+            os.remove(mark_file())
+    except OSError:
+        pass
+
+
+def gap():
+    """The excisions that missed the last real system prompt. [] when clean."""
+    try:
+        with open(mark_file()) as fh:
+            return list(json.load(fh).get("missed") or [])
+    except (OSError, ValueError, TypeError):
+        return []
 
 
 def note_usage(row):
@@ -210,7 +315,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def relay(self, raw):
         rewrote = self.path.split("?")[0] in INTERCEPT
-        body = rewrite_body(raw) if rewrote else raw
+        body, missed = rewrite_body(raw) if rewrote else (raw, None)
+        if missed is not None:
+            mark_gap(missed)
         headers = {k: v for k, v in self.headers.items()
                    if k.lower() not in HOP}
         headers["Content-Length"] = str(len(body))
@@ -256,6 +363,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         row = {"ts": time.strftime("%FT%T%z"), "path": self.path,
                "status": upstream.status, "rewritten": rewrote,
                "elapsed_s": round(time.time() - started, 2)}
+        if missed:
+            row["identity_missed"] = missed
         row.update(usage_of(seen))
         note_usage(row)
 
@@ -320,8 +429,13 @@ def serve(port=None):
     port = PORT if port is None else port
     srv = Server(("127.0.0.1", port), Handler)
     kernel = kernel_text()
+    rows = identity()
     print(f"[kernel] {base_url(port)} -> https://{UPSTREAM}  "
-          f"kernel={len(kernel)} chars  log={LOG}", flush=True)
+          f"kernel={len(kernel)} chars  excise={len(rows)}  log={LOG}",
+          flush=True)
+    if not rows:
+        print(f"[kernel] !! nothing to excise - {IDENTITY_FILE} is missing or "
+              f"malformed, so the stock identity will survive", flush=True)
     srv.serve_forever()
 
 

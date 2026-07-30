@@ -1,0 +1,37 @@
+{
+  "_": [
+    "The sentences that make claude claude, and the one place they are written.",
+    "",
+    "Excising these is what makes room for a different identity instead of a",
+    "second one arguing with the first. Both backends read this file - the",
+    "built-in wrapper at import, and the external cc-kernel-proxy by way of the",
+    "config check in proxy.py - so a reword is edited here once.",
+    "",
+    "They are pinned to exact sentences of a particular Claude Code release, and",
+    "a future one that rewords its opening line will match none of them. That is",
+    "the failure this file exists to make loud: a miss on a real system prompt is",
+    "recorded in the usage log, marked on the status line, and reported by",
+    "`bottleneck kernel`, because the alternative is a session that looks fine",
+    "and quietly carries two identities.",
+    "",
+    "pattern  the regex excised from every system text block",
+    "witness  a plain substring of what it removes, used to check a rewrite from",
+    "         the outside - if this survives a rewrite, the excision failed",
+    "matched  the Claude Code version the pattern was last confirmed against"
+  ],
+  "excise": [
+    {
+      "name": "cli-sentence",
+      "pattern": "You are Claude Code, Anthropic's official CLI for Claude\\.\\s*",
+      "witness": "official CLI for Claude",
+      "matched": "2.1.220"
+    },
+    {
+      "name": "interactive-agent",
+      "pattern": "You are an interactive agent that helps users with software engineering tasks\\.\\s*",
+      "witness": "interactive agent that helps users with software engineering",
+      "matched": "2.1.220"
+    }
+  ],
+  "min_system_chars": 2000
+}

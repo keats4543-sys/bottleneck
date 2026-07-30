@@ -96,6 +96,47 @@ check("its meter is read, and a bad line does not stop the count",
       p.usage(), (2, 300, 3, 3000))
 
 
+print("\nthe proxy keeps its own copy of the sentences, and is held to ours")
+# The duplication that cannot be removed: the external proxy is a separate
+# program with its own config. So identity.json stays the source and the two
+# are compared, because a reword applied to one copy and not the other is a
+# rewrite that stopped working with nothing to show for it.
+from bottleneck.modules.kernel import wrap
+config = os.path.join(root, "config.toml")
+base = open(config).read()
+
+
+def with_patterns(patterns):
+    open(config, "w").write(base + "".join(
+        f'\n[[rewrite.replacements]]\npattern = {json.dumps(p)}\nreplace = ""\n'
+        for p in patterns))
+
+
+want = [row["pattern"] for row in wrap.identity()]
+with_patterns(want)
+check("in step with identity.json, there is nothing to report", p.gap(), [])
+with_patterns(want[:1])
+check("a sentence identity.json excises and the proxy does not is named",
+      p.gap(), ["config.toml does not excise interactive-agent"])
+with_patterns(want + [r"You are a helpful assistant\.\s*"])
+check("and so is one the proxy excises that identity.json has never heard of",
+      [line.split(":")[0] for line in p.gap()],
+      ["config.toml excises a pattern identity.json does not"])
+
+with_patterns(want)
+dump = os.path.join(root, "log", "last_request.json")
+open(dump, "w").write(json.dumps({"system": [
+    {"type": "text", "text": "# Operating Identity\n\nx" + "y" * 4000},
+    {"type": "text", "text": "You are an interactive agent that helps users "
+                             "with software engineering tasks."}]}))
+check("a stock sentence still in the body it actually sent is a live failure",
+      p.gap(), ["interactive-agent survived a real prompt"])
+open(dump, "w").write(json.dumps({"system": [
+    {"type": "text", "text": "# Operating Identity\n\nx" + "y" * 4000}]}))
+check("and a body it rewrote cleanly says nothing", p.gap(), [])
+os.remove(dump)
+
+
 print("\ndown, and not coming up")
 p.AUTOSTART = False
 check("nothing is listening", p.up(), False)

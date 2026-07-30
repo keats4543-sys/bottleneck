@@ -35,7 +35,7 @@ natively, so nothing is patched and nothing is wrapped.
 | point | what it does |
 |---|---|
 | `env` | `ANTHROPIC_BASE_URL`, and the backend started if it was down |
-| `status` | `kernel` on the tmux status line while it is up |
+| `status` | `kernel` on the tmux status line while it is up, `kernel!` when a sentence it expected to excise stopped matching |
 | `commands` | `bottleneck kernel` — what is running, and what it has cost |
 
 ## The three rules the rewrite will not break
@@ -60,11 +60,42 @@ cache read into a cache write and costs money instead of saving it.
 Rules 1 and 3 were learned from a live head, in that order: the 400 came first,
 and the first fix for it dropped the empty block and moved a caching breakpoint.
 
+## The fourth rule, about being wrong
+
+The sentences excised are pinned to exact wording of one Claude Code release.
+A later one that says the same thing differently matches nothing, the stock
+identity survives, and the kernel goes in *beside* the identity it was meant to
+replace — two identities in the prompt, nothing raised, and behaviour you would
+struggle to attribute weeks later.
+
+So the sentences live in one file, [`identity.json`](identity.json), with the
+version each was last confirmed against, and **a miss is made loud three ways**:
+
+| where | what you see |
+|---|---|
+| status line | `kernel!` instead of `kernel` |
+| `bottleneck kernel` | the excision named, and a non-zero exit |
+| usage log | `identity_missed` on the row for that request |
+
+A miss is only counted against a system prompt big enough to be a real one —
+Claude Code's startup quota probe carries almost no system text, and calling
+that a failed excision would cry wolf before every session began.
+
+The external proxy is a separate program with its own config, so its copy
+cannot be deleted — it is *checked* instead. `proxy.gap()` compares
+`config.toml`'s patterns against `identity.json` and reports drift in either
+direction, and reads the proxy's own debug dump of the body it last sent: a
+stock sentence still in there after a rewrite is a live failure whatever the
+config claims. `bottleneck kernel show` prints the stanza to paste when they
+have parted company.
+
 ## Commands
 
 ```
 bottleneck kernel        up or down, what it injects, what it has metered
 bottleneck kernel start  bring it up now rather than at the next head
+bottleneck kernel show   the prompt a head would get, and whether every
+                         sentence we mean to excise still matches
 ```
 
 ## Settings
@@ -75,6 +106,7 @@ bottleneck kernel start  bring it up now rather than at the next head
 | `BOTTLENECK_KERNEL_ROOT` | the proxy checkout (default `~/cc-kernel-proxy`) |
 | `BOTTLENECK_KERNEL_PORT` | the builtin wrapper's port (default 8791) |
 | `BOTTLENECK_KERNEL_FILE` | the identity text it injects (default `kernel.md`) |
+| `BOTTLENECK_KERNEL_IDENTITY` | the sentences it excises (default `identity.json`) |
 | `BOTTLENECK_KERNEL_AUTOSTART` | `0` to never start it, only use it if it is up |
 | `BOTTLENECK_KERNEL_WAIT` | seconds to wait for a starting proxy (default 3) |
 
