@@ -44,13 +44,18 @@ USAGE = """Heads run through a rewriting proxy (`bottleneck kernel`):
 
 
 def backend():
-    """"builtin" or "proxy" - which one this machine should be using."""
+    """"builtin" or "proxy" - which one this machine should be using.
+
+    The default is the one in this repository. It was the other way round while
+    the built-in wrapper was a demonstration, and that is exactly the state
+    worth not being in: heads depending every day on a checkout that is not
+    version controlled here, cannot be reviewed here, and carries its own copy
+    of rules this module is held to. Asking for it by name still works.
+    """
     said = os.environ.get("BOTTLENECK_KERNEL_BACKEND", "").strip().lower()
-    if said in ("builtin", "wrap"):
-        return "builtin"
     if said in ("proxy", "external", "cc-kernel-proxy"):
         return "proxy"
-    return "proxy" if proxy.PRESENT else "builtin"
+    return "builtin"
 
 
 def chosen():

@@ -18,8 +18,16 @@
     "comma-separated order, or 'none' to forward every request exactly as it",
     "came, which is the first thing to try when a session is behaving oddly."
   ],
-  "run": ["identity"],
+  "run": ["identity", "truncate"],
   "settings": {
+    "truncate": {
+      "max_chars": 40000,
+      "head": 30000,
+      "tail": 8000
+    },
+    "strip": {
+      "patterns": []
+    },
     "memory": {
       "file": null,
       "max_chars": 4000

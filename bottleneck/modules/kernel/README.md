@@ -18,11 +18,15 @@ streams the answer back and meters the tokens. This is what makes the module a
 demonstration of the idea rather than a pointer at somebody else's program.
 
 **`proxy`** — an external [cc-kernel-proxy](../../../../cc-kernel-proxy)
-checkout, which does the same job properly: configurable replacement rules,
-token-optimisation passes, its own test suite.
+checkout. Same job, done in aiohttp with its own config and test suite.
 
-`BOTTLENECK_KERNEL_BACKEND` picks one. The default is whichever is available,
-preferring the external checkout — a machine that has one has it for a reason.
+`BOTTLENECK_KERNEL_BACKEND` picks one, and **the default is the built-in.** It
+was the other way round while the wrapper was a demonstration, which is exactly
+the position worth not being in: heads depending every day on a checkout that
+is not version controlled here, cannot be reviewed here, and keeps its own copy
+of the rules this module is held to. Both of the external proxy's passes —
+identity replacement and deterministic `tool_result` truncation — are stages
+here now, so nothing is lost by not having it.
 
 ```
 bottleneck  ──spawns──▶  head (ANTHROPIC_BASE_URL=127.0.0.1:8790)
@@ -171,7 +175,7 @@ bottleneck kernel stages what can run, what does run, and in what order
 | `BOTTLENECK_KERNEL_BACKEND` | `builtin` or `proxy`; default prefers the checkout |
 | `BOTTLENECK_KERNEL_ROOT` | the proxy checkout (default `~/cc-kernel-proxy`) |
 | `BOTTLENECK_KERNEL_PORT` | the builtin wrapper's port (default 8791) |
-| `BOTTLENECK_KERNEL_FILE` | the identity text it injects (default `kernel.md`) |
+| `BOTTLENECK_KERNEL_FILE` | the identity text it injects — otherwise `~/.bottleneck/kernel/kernel.md` if you have one, else the demo in this directory |
 | `BOTTLENECK_KERNEL_IDENTITY` | the sentences it excises (default `identity.json`) |
 | `BOTTLENECK_KERNEL_STAGES` | which stages run, in order; `none` for a plain hop |
 | `BOTTLENECK_KERNEL_STAGES_DIR` | where to look for stages before looking here |

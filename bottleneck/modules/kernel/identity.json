@@ -7,6 +7,17 @@
     "built-in wrapper at import, and the external cc-kernel-proxy by way of the",
     "config check in proxy.py - so a reword is edited here once.",
     "",
+    "min_system_chars is the line between a prompt worth judging and one that is",
+    "not, and it is measured rather than guessed. Claude Code's agent prompt was",
+    "12,066 chars on v2.1.220. It also makes smaller requests with system prompts",
+    "of their own - a title generation, a quota probe - which contain some of",
+    "these sentences and not others, and judging one of those reported a failed",
+    "excision on a rewrite that was working. That false alarm is the exact thing",
+    "this file exists to avoid, so the threshold sits above the largest of them",
+    "(~5,300 chars) and well below the agent prompt. The residual risk is the",
+    "quiet direction: if the agent prompt ever shrinks past this, we stop",
+    "judging rather than start lying.",
+    "",
     "They are pinned to exact sentences of a particular Claude Code release, and",
     "a future one that rewords its opening line will match none of them. That is",
     "the failure this file exists to make loud: a miss on a real system prompt is",
@@ -33,5 +44,5 @@
       "matched": "2.1.220"
     }
   ],
-  "min_system_chars": 2000
+  "min_system_chars": 8000
 }

@@ -243,8 +243,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         told = stages.gaps(reports)
         if told:
             row["stage_gaps"] = told
-        if reports:
-            row["stages"] = sorted(reports)
+        for name, report in (reports or {}).items():
+            for key, val in report.items():
+                if key not in ("gap", "judged"):
+                    row[f"{name}.{key}"] = val
         row.update(usage_of(seen))
         note_usage(row)
 
@@ -287,11 +289,19 @@ def start(wait=3.0, port=None):
         return True
     if not AUTOSTART:
         return False
+    # Started as a module, not as a script. It loads stages by relative import
+    # now, and a file run by path has no package to be relative to - which is
+    # not a thing any test sees, because a test imports it. The first live head
+    # after that change found it in one go.
+    root = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+    env = dict(os.environ)
+    env["PYTHONPATH"] = root + os.pathsep + env.get("PYTHONPATH", "")
     try:
         os.makedirs(os.path.dirname(LOG), exist_ok=True)
         with open(os.path.join(os.path.dirname(LOG), "wrap.log"), "a") as log:
-            subprocess.Popen([sys.executable, os.path.abspath(__file__),
-                              str(port)],
+            subprocess.Popen([sys.executable, "-m",
+                              "bottleneck.modules.kernel", str(port)],
+                             cwd=root, env=env,
                              stdout=log, stderr=log, stdin=subprocess.DEVNULL,
                              start_new_session=True)
     except Exception:                   # noqa: BLE001

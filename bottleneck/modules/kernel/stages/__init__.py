@@ -12,18 +12,25 @@ The identity rewrite is *not* built in. It is `stages/identity.py`, listed in
 stages.json like anything else, and deleting that line turns it off. That is the
 test of whether this is an interface or a decoration.
 
-  The two classes, and why the split is not cosmetic
+  The three classes, and why the split is not cosmetic
 
 Prompt caching is a byte-prefix match, so what a stage may write decides what it
 must promise. The split is enforced by what each kind of stage is handed - a
-prefix stage never receives the messages, a tail stage never receives the system
-field - so a stage cannot exceed its class by accident or by trying.
+prefix stage never receives the messages, a history stage never receives the
+system field, a tail stage sees one message - so a stage cannot exceed its class
+by accident or by trying.
 
-  prefix   apply(system, ctx). The cached part: the system blocks. Must be pure
-           and shape-preserving, because every request in a session resends it
-           and any variation turns a cache read into a cache write. Checked:
-           run twice on its first real body, and the result compared block for
+  prefix   apply(system, ctx). The system blocks. Must be pure and
+           shape-preserving, because every request in a session resends them and
+           any variation turns a cache read into a cache write. Checked: run
+           twice on its first real body, and the result compared block for
            block, cache_control for cache_control.
+
+  history  apply(messages, ctx). The turns so far, which are cached too - a
+           conversation grows and everything before the last breakpoint is
+           resent. Same promise as prefix and for the same reason, held to the
+           same count of messages in the same roles. This is where a
+           deterministic truncation of an enormous tool result belongs.
 
   tail     apply(message, ctx). The newest message, which sits after the last
            cache breakpoint and is therefore nobody's prefix. Free to be
@@ -37,7 +44,7 @@ more than it sounds.
 
     STAGE = {
         "summary": "one line, for `bottleneck kernel stages`",
-        "writes":  "prefix" or "tail",
+        "writes":  "prefix", "history" or "tail",
         "apply":   fn(what, ctx) -> report or None,
     }
 """
@@ -53,7 +60,7 @@ CONFIG = os.environ.get(
     "BOTTLENECK_KERNEL_STAGES_FILE",
     os.path.join(os.path.dirname(HERE), "stages.json"))
 
-WRITES = ("prefix", "tail")
+WRITES = ("prefix", "history", "tail")
 
 _found = None
 _loaded = {}
@@ -240,6 +247,41 @@ def _prefix(name, stage, body, ctx):
     return report
 
 
+def roles(messages):
+    """What a history stage may not change: how many turns, and whose."""
+    return tuple(m.get("role") if isinstance(m, dict) else "?"
+                 for m in messages)
+
+
+def _history(name, stage, body, ctx):
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return None
+    # The copy is the expensive line in this file - a long conversation is a
+    # few hundred kilobytes and this runs per stage per turn. Measured against
+    # a model answer it is noise, and it buys the only thing that makes putting
+    # a stage down worth doing: the request that broke it goes out intact.
+    keep = copy.deepcopy(messages)
+    twice = copy.deepcopy(messages) if name not in _checked else None
+    try:
+        report = stage["apply"](messages, ctx)
+        if roles(messages) != roles(keep):
+            raise ValueError("changed which turns the conversation has - the "
+                             "shape of the history is claude's, not ours")
+        if twice is not None:
+            _checked.add(name)
+            stage["apply"](twice, ctx)
+            if json.dumps(twice) != json.dumps(messages):
+                raise ValueError("is not a pure function of its input - the "
+                                 "same bytes in gave different bytes out, "
+                                 "which turns every cache read in the session "
+                                 "into a write")
+    except Exception:
+        body["messages"] = keep
+        raise
+    return report
+
+
 def _tail(name, stage, body, ctx):
     messages = body.get("messages")
     if not isinstance(messages, list) or not messages:
@@ -265,7 +307,8 @@ def run(body, ctx=None):
     ctx = dict(ctx or {})
     reports = {}
     for name, stage in enabled():
-        run_it = _prefix if stage["writes"] == "prefix" else _tail
+        run_it = {"prefix": _prefix, "history": _history}.get(
+            stage["writes"], _tail)
         try:
             report = run_it(name, stage, body, dict(ctx, stage=name))
         except Exception as exc:                # noqa: BLE001 - see _put_down

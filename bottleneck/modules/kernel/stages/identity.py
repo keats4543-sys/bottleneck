@@ -23,8 +23,27 @@ import re
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-KERNEL_FILE = os.environ.get("BOTTLENECK_KERNEL_FILE",
-                             os.path.join(os.path.dirname(HERE), "kernel.md"))
+
+
+def _kernel_file():
+    """Yours if you have one, ours if you do not.
+
+    The kernel is the one part of this that is genuinely personal - it is what
+    you want a session to be - so the state directory wins over the checkout,
+    and the file in the module stays a demonstration rather than something you
+    have to edit around. Nothing writes your kernel into this repository.
+    """
+    said = os.environ.get("BOTTLENECK_KERNEL_FILE")
+    if said:
+        return os.path.expanduser(said)
+    yours = os.path.join(os.environ.get("BOTTLENECK_STATE")
+                         or os.path.expanduser("~/.bottleneck"),
+                         "kernel", "kernel.md")
+    return yours if os.path.exists(yours) else os.path.join(
+        os.path.dirname(HERE), "kernel.md")
+
+
+KERNEL_FILE = _kernel_file()
 IDENTITY_FILE = os.environ.get(
     "BOTTLENECK_KERNEL_IDENTITY",
     os.path.join(os.path.dirname(HERE), "identity.json"))

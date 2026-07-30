@@ -126,13 +126,13 @@ check("and so is one the proxy excises that identity.json has never heard of",
 with_patterns(want)
 dump = os.path.join(root, "log", "last_request.json")
 open(dump, "w").write(json.dumps({"system": [
-    {"type": "text", "text": "# Operating Identity\n\nx" + "y" * 4000},
+    {"type": "text", "text": "# Operating Identity\n\nx" + "y" * 9000},
     {"type": "text", "text": "You are an interactive agent that helps users "
                              "with software engineering tasks."}]}))
 check("a stock sentence still in the body it actually sent is a live failure",
       p.gap(), ["interactive-agent survived a real prompt"])
 open(dump, "w").write(json.dumps({"system": [
-    {"type": "text", "text": "# Operating Identity\n\nx" + "y" * 4000}]}))
+    {"type": "text", "text": "# Operating Identity\n\nx" + "y" * 9000}]}))
 check("and a body it rewrote cleanly says nothing", p.gap(), [])
 os.remove(dump)
 

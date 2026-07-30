@@ -128,7 +128,7 @@ print("\na reword of claude's opening is loud, not silent")
 # was meant to replace - a session that reads as working and is not. So a
 # system prompt big enough to be real, with an excision that found nothing in
 # it, has to leave a mark somewhere a person will see.
-BIG = "\n\nfiller that makes this a real prompt rather than a probe. " * 60
+BIG = "\n\nfiller that makes this a real prompt rather than a probe. " * 200
 
 
 def reworded():

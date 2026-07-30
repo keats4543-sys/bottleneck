@@ -199,6 +199,62 @@ using("quiet")
 check("a stage that did not judge leaves the verdict open, not clean",
       stages.verdict(stages.run(body())), None)
 
+print("\nthe history class: cached like the prefix, held to the same promise")
+stage("reader", '''
+def apply(messages, ctx):
+    return {"judged": True, "turns": len(messages),
+            "system_visible": isinstance(messages, dict)}
+STAGE = {"summary": "reads", "writes": "history", "apply": apply}
+''')
+using("reader")
+b = body()
+b["messages"].append({"role": "assistant", "content": "hi back"})
+got = stages.run(b)["reader"]
+check("a history stage is handed the turns and not the system field",
+      (got["turns"], got["system_visible"]), (2, False))
+
+stage("forgetter", '''
+def apply(messages, ctx):
+    messages.pop()
+    return {"judged": True}
+STAGE = {"summary": "drops a turn", "writes": "history", "apply": apply}
+''')
+using("forgetter")
+b = body()
+b["messages"].append({"role": "assistant", "content": "hi back"})
+check("one that changes which turns exist is put down", stages.run(b), {})
+check("and the conversation it was given is handed back whole",
+      [m["role"] for m in b["messages"]], ["user", "assistant"])
+
+
+print("\ntruncate, the stage that pays for itself only if it is deterministic")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from bottleneck.modules.kernel.stages import truncate
+
+big = "HEAD" + "x" * 100000 + "TAIL"
+once, twice = truncate.cut(big, 40000, 30000, 8000), None
+twice = truncate.cut(big, 40000, 30000, 8000)
+check("the same string cuts to the same string", once, twice)
+check("which is the whole point - it is keyed on content and nothing else",
+      truncate.cut(big, 40000, 30000, 8000), once)
+check("the head is kept", once.startswith("HEAD"), True)
+check("and the tail, which is how the command ended", once.endswith("TAIL"),
+      True)
+check("something under the limit is left alone",
+      truncate.cut("small", 40000, 30000, 8000), "small")
+check("and it says how much it saved", len(big) - len(once) > 60000, True)
+
+turns = [{"role": "user", "content": [
+    {"type": "tool_result", "content": big},
+    {"type": "tool_result", "content": [{"type": "text", "text": big}]},
+    {"type": "text", "text": big}]}]
+report = truncate.apply(turns, {})
+check("it cuts tool results in both shapes they arrive in",
+      report["cuts"], 2)
+check("and leaves anything that is not a tool result alone",
+      turns[0]["content"][2]["text"], big)
+
+
 print("\nwhat is available but switched off is as visible as what runs")
 using("shout")
 seen = {name: (writes, trouble) for name, writes, _, trouble
