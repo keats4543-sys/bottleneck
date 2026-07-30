@@ -255,6 +255,50 @@ check("and leaves anything that is not a tool result alone",
       turns[0]["content"][2]["text"], big)
 
 
+print("\nstrip: what it removes, and what it says when it removes nothing")
+from bottleneck.modules.kernel.stages import strip
+
+REAL = ("# Harness\nhow the tools work\n\n# Delivering work\ndo the whole task\n"
+        "and all of it\n\n# Corrections\nsay so plainly\n") + "filler line\n" * 700
+CONFIGURED = [{"pattern": r"(?ms)^# Delivering work$.*?(?=^# |\Z)",
+               "required": True},
+              {"pattern": r"(?ms)^# Corrections$.*?(?=^# |\Z)",
+               "required": True}]
+
+
+def stripping(text, patterns=CONFIGURED, min_chars=8000):
+    strip._LOADED = None
+    stages.config = lambda: {"settings": {"strip": {"patterns": patterns,
+                                                    "min_chars": min_chars}}}
+    system = [{"type": "text", "text": text}]
+    return system, strip.apply(system, {})
+
+
+system, report = stripping(REAL)
+left = system[0]["text"]
+check("the sections it was pointed at are gone",
+      ("# Delivering work" in left, "# Corrections" in left), (False, False))
+check("and the ones it was not are untouched", "# Harness" in left, True)
+check("it says how many patterns hit and how much went",
+      (report["stripped"], report["chars"] > 40), (2, True))
+check("nothing to report as a failure", report.get("gap"), None)
+
+_, report = stripping(REAL.replace("# Corrections", "# Correcting yourself"))
+check("a section that was reworded away is named, not silently skipped",
+      report["gap"], ["required pattern matched nothing: (?ms)^# Corrections$"
+                      ".*?(?=^# |\\Z)"])
+
+_, report = stripping("# Delivering work\nshort prompt\n")
+check("but a prompt too small to be the one these were written for is not "
+      "judged", report.get("judged"), None)
+
+_, report = stripping(REAL, patterns=[{"pattern": "(?ms)^# Harness$.*"}])
+check("an optional pattern that matches nothing is nobody's failure",
+      report.get("gap"), None)
+del stages.config                       # back to reading the real file
+strip._LOADED = None
+
+
 print("\nwhat is available but switched off is as visible as what runs")
 using("shout")
 seen = {name: (writes, trouble) for name, writes, _, trouble

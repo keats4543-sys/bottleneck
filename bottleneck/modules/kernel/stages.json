@@ -18,7 +18,11 @@
     "comma-separated order, or 'none' to forward every request exactly as it",
     "came, which is the first thing to try when a session is behaving oddly."
   ],
-  "run": ["identity", "truncate"],
+  "run": [
+    "identity",
+    "strip",
+    "truncate"
+  ],
   "settings": {
     "truncate": {
       "max_chars": 40000,
@@ -26,7 +30,17 @@
       "tail": 8000
     },
     "strip": {
-      "patterns": []
+      "min_chars": 8000,
+      "patterns": [
+        {
+          "pattern": "(?ms)^# Delivering work$.*?(?=^# |\\Z)",
+          "required": true
+        },
+        {
+          "pattern": "(?ms)^# Corrections$.*?(?=^# |\\Z)",
+          "required": true
+        }
+      ]
     },
     "memory": {
       "file": null,

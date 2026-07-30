@@ -42,10 +42,28 @@ def patterns():
     return out
 
 
+def min_chars():
+    """Below this, a prompt is not one these patterns were written for.
+
+    The same gate identity.py keeps, and for the same reason: Claude Code makes
+    smaller requests with system prompts of their own, and a required pattern
+    cannot match a section that prompt never had. Judging one of those would
+    report a failure on a strip that is working - which is the whole failure
+    mode this reporting exists to avoid.
+    """
+    from . import settings
+    try:
+        return int(settings("strip").get("min_chars", 8000))
+    except (TypeError, ValueError):
+        return 8000
+
+
 def apply(system, ctx):
     rows = patterns()
     if not rows or not isinstance(system, list):
         return None
+    size = sum(len(b.get("text") or "") for b in system
+               if isinstance(b, dict) and b.get("type") == "text")
     hit, chars = set(), 0
     for block in system:
         if not isinstance(block, dict) or block.get("type") != "text":
@@ -62,6 +80,8 @@ def apply(system, ctx):
         # get one. The identity stage learned this from a live head.
         if text.strip():
             block["text"] = text
+    if size < min_chars():
+        return {"chars": chars}         # no `judged`: nothing to judge here
     missing = [src for _r, required, src in rows if required and src not in hit]
     report = {"judged": True, "stripped": len(hit), "chars": chars}
     if missing:

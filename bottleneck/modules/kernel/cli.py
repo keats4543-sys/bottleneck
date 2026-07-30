@@ -31,8 +31,19 @@ def usage_rows(path, limit=200):
 # real thing - a stage that only judges prompts big enough to be real (and they
 # should) has nothing to say about a three-line sample.
 def sample():
-    bulk = ("\nIMPORTANT: ...the rest of claude's own prompt continues here, "
-            "untouched, for about this much more...\n" * 90)
+    # Shaped like the real thing rather than padded, because the stages are
+    # judged against it: one that strips a named section has nothing to say
+    # about a wall of filler, and a demo that cannot fail is not a check.
+    filler = ("...the rest of claude's own prompt continues here, untouched, "
+              "for about this much more...\n" * 20)
+    bulk = "\n".join([
+        "\nIMPORTANT: Assist with authorized security testing.",
+        "\n# Harness\n" + filler,
+        "\n# Memory\n" + filler,
+        "\n# Environment\n" + filler,
+        "\n# Delivering work\n" + filler,
+        "\n# Corrections\n" + filler,
+    ])
     return {
         "system": [
             {"type": "text",
