@@ -1,0 +1,48 @@
+{
+  "_": [
+    "The sentences that make claude claude, and the one place they are written.",
+    "",
+    "Excising these is what makes room for a different identity instead of a",
+    "second one arguing with the first.",
+    "",
+    "min_system_chars is the line between a prompt worth judging and one that is",
+    "not, and it is measured rather than guessed. Claude Code's agent prompt was",
+    "12,066 chars on v2.1.220. It also makes smaller requests with system prompts",
+    "of their own - a title generation, a quota probe - which contain some of",
+    "these sentences and not others, and judging one of those reported a failed",
+    "excision on a rewrite that was working. That false alarm is the exact thing",
+    "this file exists to avoid, so the threshold sits above the largest of them",
+    "(~5,300 chars) and well below the agent prompt. The residual risk is the",
+    "quiet direction: if the agent prompt ever shrinks past this, we stop",
+    "judging rather than start lying.",
+    "",
+    "They are pinned to exact sentences of a particular Claude Code release, and",
+    "a future one that rewords its opening line will match none of them. That is",
+    "the failure this file exists to make loud: a miss on a real system prompt is",
+    "recorded in the usage log, marked on the status line, and reported by",
+    "`bottleneck kernel`, because the alternative is a session that looks fine",
+    "and quietly carries two identities.",
+    "",
+    "pattern  the regex excised from every system text block",
+    "witness  a plain substring of what it removes. Checked after the rewrite:",
+    "         still present means the excision did not do its job, which is what",
+    "         a partly reworded sentence looks like - the pattern matches some of",
+    "         it and leaves the rest behind, so counting matches alone says fine",
+    "matched  the Claude Code version the pattern was last confirmed against"
+  ],
+  "excise": [
+    {
+      "name": "cli-sentence",
+      "pattern": "You are Claude Code, Anthropic's official CLI for Claude\\.\\s*",
+      "witness": "official CLI for Claude",
+      "matched": "2.1.220"
+    },
+    {
+      "name": "interactive-agent",
+      "pattern": "You are an interactive agent that helps users with software engineering tasks\\.\\s*",
+      "witness": "interactive agent that helps users with software engineering",
+      "matched": "2.1.220"
+    }
+  ],
+  "min_system_chars": 8000
+}

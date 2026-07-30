@@ -1,0 +1,207 @@
+"""`bottleneck kernel` - is it up, what does it run, what has it cost.
+
+Nothing in here knows what a stage does. It asks the registry which are running
+and prints what each one reports and explains about itself, so a stage you write
+is as visible as the ones shipped - which is the difference between an interface
+and a list of special cases.
+"""
+import json
+import os
+
+from . import stages
+from . import wrap
+
+
+def usage_rows(path, limit=200):
+    try:
+        with open(path) as fh:
+            lines = fh.readlines()[-limit:]
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+# Claude Code's real opening, one release of it, padded to the length of the
+# real thing - a stage that only judges prompts big enough to be real (and they
+# should) has nothing to say about a three-line sample.
+def sample():
+    # Shaped like the real thing rather than padded, because the stages are
+    # judged against it: one that strips a named section has nothing to say
+    # about a wall of filler, and a demo that cannot fail is not a check.
+    filler = ("...the rest of claude's own prompt continues here, untouched, "
+              "for about this much more...\n" * 20)
+    bulk = "\n".join([
+        "\nIMPORTANT: Assist with authorized security testing.",
+        "\n# Harness\n" + filler,
+        "\n# Memory\n" + filler,
+        "\n# Environment\n" + filler,
+        "\n# Delivering work\n" + filler,
+        "\n# Corrections\n" + filler,
+    ])
+    return {
+        "system": [
+            {"type": "text",
+             "text": "You are Claude Code, Anthropic's official CLI for "
+                     "Claude.\ncc-billing-header: cc_version=x; "
+                     "cc_entrypoint=cli;"},
+            {"type": "text",
+             "text": "You are an interactive agent that helps users with "
+                     "software engineering tasks.",
+             "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+            {"type": "text", "text": bulk,
+             "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+        ],
+        "messages": [{"role": "user", "content": "what does this repo do?"}],
+    }
+
+
+def show_prompt():
+    """What a head would actually be sent, run through the stages configured.
+
+    The claim this command exists to check, and it is checkable rather than
+    asserted: every stage runs here exactly as it runs on a live request, so
+    what comes back is what a head gets.
+    """
+    was, now = sample(), sample()
+    reports = stages.run(now, {"path": "/v1/messages", "why": "show"})
+    running = stages.enabled()
+    if not running:
+        print("  no stages configured - a head would be sent claude's own "
+              f"prompt, unchanged\n  ({stages.CONFIG})")
+        return 0
+    print(f"  stages: {', '.join(n for n, _ in running)}")
+
+    print(f"\n  system: {len(was['system'])} blocks in, {len(now['system'])} "
+          f"out (the shape is never ours to change)")
+    for i, (before, after) in enumerate(zip(was["system"], now["system"])):
+        same = before.get("cache_control") == after.get("cache_control")
+        print(f"\n  --- block {i}: {len(before['text'])} -> "
+              f"{len(after['text'])} chars, cache_control "
+              f"{'unchanged' if same else 'MOVED - this is a bug'}")
+        for line in (after["text"].splitlines() or [""])[:6]:
+            print(f"      {line[:96]}")
+        extra = len(after["text"].splitlines()) - 6
+        if extra > 0:
+            print(f"      ... {extra} more lines")
+
+    tail_was = json.dumps(was["messages"][-1])
+    tail_now = json.dumps(now["messages"][-1])
+    if tail_was != tail_now:
+        print(f"\n  --- newest turn: {len(tail_was)} -> {len(tail_now)} chars "
+              f"(after the last breakpoint, so it is nobody's prefix)")
+        for line in json.loads(tail_now)["content"].splitlines()[:8]:
+            print(f"      {line[:96]}")
+
+    print("\n  what each stage said of it")
+    for name, stage in running:
+        report = reports.get(name) or {}
+        told = ", ".join(f"{k}={v}" for k, v in sorted(report.items())
+                         if k not in ("gap", "judged")) or "nothing to report"
+        print(f"    {name:<10} {stage['writes']:<7} {told}")
+        for line in (stage.get("explain") or (lambda: []))():
+            print(f"      {line}")
+
+    holes = live_gap()
+    for line in stages.gaps(reports):
+        if line not in holes:
+            holes.append(line)
+    for line in holes:
+        print(f"\n  FAILING: {line}")
+    return 1 if holes else 0
+
+
+def show_stages():
+    """Every stage on disk: what runs, in what order, and what does not."""
+    print(f"  {stages.CONFIG}")
+    print("  BOTTLENECK_KERNEL_STAGES overrides it for one process "
+          "('none' runs the wrapper as a plain hop)\n")
+    for name, writes, summary, trouble in stages.listing():
+        flag = "  " if trouble is None else "!!"
+        print(f"  {flag} {name:<10} {writes:<7} {summary}")
+        if trouble:
+            print(f"       {trouble}")
+    return 0
+
+
+def live_gap():
+    """What the running wrapper is failing on, as opposed to the sample."""
+    try:
+        return list(wrap.gap())
+    except Exception:                   # noqa: BLE001
+        return []
+
+
+def kernel_cmd(cmd, rest):
+    what = (rest[0] if rest else "").strip().lower()
+
+    if what == "show":
+        return show_prompt()
+
+    if what in ("stages", "stage"):
+        return show_stages()
+
+    if what == "start":
+        if wrap.up():
+            print(f"already up on {wrap.base_url()}")
+            return 0
+        print("starting ...")
+        if wrap.start(wait=10):
+            print(f"up on {wrap.base_url()}")
+            return 0
+        print("did not come up")
+        print(f"  see {os.path.dirname(wrap.LOG)}/wrap.log")
+        return 1
+
+    if what and what != "status":
+        print(f"unknown: bottleneck kernel {what}")
+        print("  status | start | show | stages")
+        return 2
+
+    live = wrap.up()
+    print(f"{'up  ' if live else 'down'} {wrap.base_url()}")
+    print(f"     {os.path.dirname(os.path.abspath(wrap.__file__))} "
+          f"(standard library only, in this checkout)")
+    print(f"     stages: {', '.join(n for n, _ in stages.enabled()) or 'none'}")
+
+    holes = live_gap()
+    if holes:
+        print()
+        for line in holes:
+            print(f"  !! {line}")
+        print("  !! a stage that is configured is not doing what it was "
+              "configured to do")
+        print("  !! `bottleneck kernel show` runs them and says which")
+        print()
+
+    if not live:
+        print("     heads opened now would go straight to the API")
+        print("     `bottleneck kernel start` brings it up")
+        return 1 if holes else 0
+
+    rows = usage_rows(wrap.LOG)
+    good = [r for r in rows if r.get("status") == 200]
+    if not rows:
+        print("     nothing metered yet")
+        return 1 if holes else 0
+    sent = sum(r.get("input_tokens") or 0 for r in rows)
+    back = sum(r.get("output_tokens") or 0 for r in rows)
+    made = sum(r.get("cache_creation_input_tokens") or 0 for r in rows)
+    read = sum(r.get("cache_read_input_tokens") or 0 for r in rows)
+    saved = sum(r.get("truncate.chars_saved") or 0 for r in rows)
+    print(f"     last {len(rows)} requests ({len(good)} ok): {sent:,} in, "
+          f"{back:,} out")
+    print(f"     cache: {made:,} written, {read:,} read")
+    if saved:
+        print(f"     truncate: {saved:,} chars of tool output not resent")
+    bad = [r for r in rows if r.get("status") and r["status"] >= 400]
+    if bad:
+        last = bad[-1]
+        print(f"     {len(bad)} failed, most recently {last.get('status')} at "
+              f"{str(last.get('ts'))[11:19]}")
+    return 1 if holes else 0
