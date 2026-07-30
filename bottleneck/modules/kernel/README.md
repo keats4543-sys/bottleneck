@@ -171,6 +171,7 @@ bottleneck kernel stages what can run, what does run, and in what order
 | `BOTTLENECK_KERNEL_STAGES` | which stages run, in order; `none` for a plain hop |
 | `BOTTLENECK_KERNEL_STAGES_DIR` | where to look for stages before looking here |
 | `BOTTLENECK_KERNEL_MEMORY` | the file the memory stage recalls |
+| `BOTTLENECK_KERNEL_DUMP` | `1` to write the system field, before and after, to `~/.bottleneck/kernel/last_system.json` — never the messages, and never on by default |
 | `BOTTLENECK_KERNEL_AUTOSTART` | `0` to never start it, only use it if it is up |
 
 ## What it will not do

@@ -57,6 +57,14 @@ LOG = os.path.expanduser(
 AUTOSTART = (os.environ.get("BOTTLENECK_KERNEL_AUTOSTART", "1").strip().lower()
              not in ("0", "no", "off", "false"))
 
+# Off unless you ask. What it writes is the system field only - before and
+# after - and never the messages: the system prompt is claude's boilerplate and
+# your kernel, the messages are your conversation, and only one of those is
+# something to leave lying in a file. Written to the state directory, never the
+# checkout.
+DUMP = (os.environ.get("BOTTLENECK_KERNEL_DUMP", "").strip().lower()
+        in ("1", "yes", "on", "true"))
+
 PROBE = "/health-probe"
 INTERCEPT = ("/v1/messages", "/v1/messages/count_tokens")
 
@@ -88,6 +96,26 @@ def rewrite_body(raw):
     # here otherwise. Every request takes the same path, so the bytes stay
     # stable across a session either way, which is all caching asks.
     return json.dumps(body).encode(), reports
+
+
+def dump_system(raw, after):
+    """The system field as it arrived and as it leaves. Best effort, opt-in."""
+    if not DUMP:
+        return
+    try:
+        before = json.loads(raw).get("system")
+    except (ValueError, TypeError, AttributeError):
+        return
+    if before is None:
+        return
+    try:
+        path = os.path.join(os.path.dirname(LOG), "last_system.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            json.dump({"ts": time.strftime("%FT%T%z"),
+                       "before": before, "after": after}, fh, indent=1)
+    except (OSError, TypeError):
+        pass
 
 
 def mark_file():
@@ -198,6 +226,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         rewrote = self.path.split("?")[0] in INTERCEPT
         body, reports = rewrite_body(raw) if rewrote else (raw, {})
         mark_gap(stages.verdict(reports))
+        if rewrote and DUMP and reports.get("identity", {}).get("judged"):
+            try:
+                dump_system(raw, json.loads(body).get("system"))
+            except (ValueError, TypeError):
+                pass
         headers = {k: v for k, v in self.headers.items()
                    if k.lower() not in HOP}
         headers["Content-Length"] = str(len(body))
