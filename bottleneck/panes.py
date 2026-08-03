@@ -245,6 +245,56 @@ def send_go(heads, self_pane):
     return next_or_park(heads)
 
 
+def say(head, text, submit=True):
+    """Type `text` at a head and, unless told not to, press Enter after it.
+
+    The answer you would have typed, delivered from somewhere else - another
+    pane, a script, or a client on your laptop reaching this box over ssh. It
+    is the other half of what a caller outside tmux needs: `bottleneck json`
+    says which head wants you, and this one answers it.
+
+    The text goes in as text. `send-keys -l` sends every byte literally, so a
+    word tmux would otherwise read as a key name ("Enter", "C-c") arrives as
+    that word. `--` ends the options, so an answer starting with a dash is an
+    answer and not a flag.
+
+    One line only. A newline in the middle would submit half the answer and
+    leave the rest to be read as the next one, and there is no way to send the
+    second half that is not a guess about the terminal underneath. Refusing is
+    the honest answer; the caller can split it and call twice.
+
+    Returns (note, problem), the way the other pane verbs do.
+    """
+    text = (text or "").replace("\r", "")
+    if not text.strip():
+        return "nothing to say", True
+    if "\n" in text:
+        return "one line at a time - a newline would submit half of it", True
+    if not head.get("pane_id"):
+        # A head outside tmux, or one whose claude lives on the other side of a
+        # WSL mount and never got a pane. Watched, not answered - the same rule
+        # the raise key follows, and for the same reason: there is nowhere to
+        # aim the keys.
+        where = head.get("tty") or "no tty"
+        return f"{head['name']} is not in a pane ({where}) - cannot answer it", True
+
+    # Two calls, not one tmux_many: that packs commands into one exec by
+    # putting a bare ';' between them, and a ';' is a thing somebody says. The
+    # extra round-trip is a millisecond and it cannot be made to mean anything.
+    r = tmux("send-keys", "-t", head["pane_id"], "-l", "--", text)
+    if r is None or r.returncode != 0:
+        return f"tmux would not type at {head['pane'] or head['pane_id']}", True
+
+    if submit:
+        tmux("send-keys", "-t", head["pane_id"], "Enter")
+        # It has its answer. Leaving the flags set would keep it at the top of
+        # the queue, waiting on a reply it already has.
+        clear_attention(head["session_id"])
+        mark_seen(head["session_id"])
+        answered(head)
+    return f"{head['name']} - said {len(text)} chars", False
+
+
 def answered(head):
     """Say what pressing Enter did, rather than waiting to be told it.
 

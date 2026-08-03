@@ -13,7 +13,7 @@ from .catalog import (catalog_backfill, catalog_load, catalog_save, live_ids,
                       random_name, session_list)
 from .heads import collect
 from .panes import (auto_raise, claude_cmd, focus, kill_head, next_or_park,
-                    park, reload_all, restart_here, send_go, spawn, start)
+                    park, reload_all, restart_here, say, send_go, spawn, start)
 from .tmuxio import write_keys_conf
 from .procs import claude_procs, kill_pid, proc_start
 from .store import (assign_slots, auto_enabled, buried_load, by_slot,
@@ -48,6 +48,21 @@ def last_write(rec, sid):
     return max(stamps)
 
 
+def resolve_head(heads, key):
+    """The head a caller means by a slot number, a name or a session id.
+
+    The number is what you read off the dashboard, so it is tried first and as
+    a number: a head named "7" must not take the seventh slot's answer.
+    """
+    if key.isdigit():
+        found = by_slot(heads, key)
+        if found:
+            return found
+    return next((h for h in heads
+                 if key in (h["name"], h["session_id"])
+                 or h["session_id"].startswith(key)), None)
+
+
 USAGE = """bottleneck - one tmux view over every local Claude Code head.
 
 The layout is one window, two panes: this dashboard on the left, whichever head
@@ -63,6 +78,7 @@ hidden windows; picking one moves its pane in beside the dashboard.
   bottleneck focus <n>     move head n into the main window
   bottleneck next [--jump] the next head needing attention, skipping the one up
   bottleneck send-go       press Enter at the head you are in, then move on
+  bottleneck say <n> <t>   type t at head n and press Enter (stdin if no t)
   bottleneck auto [on|off] raise waiting heads on their own (default on)
   bottleneck sessions      prior sessions by name, newest first (--all, --here)
   bottleneck resume <n>    reopen one of them, in its own directory
@@ -581,6 +597,24 @@ def main(argv):
             return 2
         print("on" if auto_enabled() else "off")
         return 0
+    if cmd == "say":
+        if not rest:
+            print("usage: bottleneck say <n|name> <text>   (text from stdin if "
+                  "none given)", file=sys.stderr)
+            return 2
+        heads = collect()
+        target = resolve_head(heads, rest[0])
+        if not target:
+            print("no match", file=sys.stderr)
+            return 1
+        words = [a for a in rest[1:] if a != "--no-enter"]
+        # Nothing on the line means the text is on stdin. That is the form a
+        # caller on the far end of an ssh pipe wants: no quoting to get wrong,
+        # and no answer of yours in this machine's process list.
+        text = " ".join(words) if words else sys.stdin.read()
+        note, problem = say(target, text, submit="--no-enter" not in rest)
+        print(note, file=sys.stderr if problem else sys.stdout)
+        return 1 if problem else 0
     if cmd in ("next", "send-go"):
         # These are the keys the dashboard serves down its control fifo, and
         # this is what happens when nothing is listening on it - a dashboard

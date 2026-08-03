@@ -642,6 +642,7 @@ bottleneck json         machine-readable
 bottleneck focus <n>    move head n into the main window
 bottleneck next         report the next head needing attention (--jump to go)
 bottleneck send-go      press Enter at the head you are in, then move on
+bottleneck say <n> <t>  type t at head n and press Enter (stdin if no t)
 bottleneck auto on|off  raise waiting heads on their own
 bottleneck sessions     prior sessions by name
 bottleneck resume <n>   reopen one
@@ -661,6 +662,14 @@ bottleneck reap         clear records of heads that are already gone
 ```
 
 `bn` is a shorter alias for the same thing.
+
+Two of those are the whole interface for a caller that is not you at a keyboard:
+`json` says which heads want you, and `say` answers one. Both are plain stdin
+and stdout, so `ssh box bottleneck json` and `ssh box bottleneck say 3` behave
+the way the local calls do. `say` takes one line at a time. A newline would
+submit half the answer and leave the rest to be read as the next one, so it is
+refused rather than guessed at, and a head with no pane is refused for the same
+reason the raise key walks past it: there is nowhere to aim the keys.
 
 ## Where the data comes from
 
